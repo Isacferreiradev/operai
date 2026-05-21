@@ -147,8 +147,12 @@ export default function App({ session, cloudState }) {
 
   // Setup beforeunload listener for immediate sync on tab close/refresh
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handleBeforeUnload = (e) => {
       if (isDirtyRef.current && payloadRef.current && session?.user?.id) {
+        // Prevent unload to give the user a warning and block data loss
+        e.preventDefault();
+        e.returnValue = '';
+
         const url = `${supabaseUrl}/rest/v1/user_app_state`;
         const body = JSON.stringify({
           user_id: session.user.id,
@@ -219,7 +223,7 @@ export default function App({ session, cloudState }) {
       setTimeout(() => setIsSyncing(false), 500); // Visual delay for feedback
     };
 
-    const debounceTimer = setTimeout(syncToCloud, 1000); // Wait 1s (reduced from 2s) after last change before syncing
+    const debounceTimer = setTimeout(syncToCloud, 300); // Wait 300ms after last change before syncing
     return () => clearTimeout(debounceTimer);
   }, [theme, offers, dailyData, tasks, ideas, diary, session]);
 
