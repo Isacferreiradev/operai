@@ -1,0 +1,32 @@
+<svg viewBox="0 0 520 140" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <linearGradient id="opGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b1d8a"/>
+      <stop offset="55%" stop-color="#6d4af5"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Chart-with-arrow icon -->
+  <g transform="translate(16,18)">
+    <!-- connecting lines -->
+    <line x1="22" y1="92" x2="50" y2="64" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round"/>
+    <line x1="78" y1="56" x2="106" y2="28" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- node squares (rounded, outlined) -->
+    <rect x="6" y="78" width="32" height="32" rx="3" fill="none" stroke="url(#opGrad)" stroke-width="6"/>
+    <rect x="50" y="42" width="32" height="32" rx="3" fill="none" stroke="url(#opGrad)" stroke-width="6"/>
+    <rect x="94" y="6" width="32" height="32" rx="3" fill="none" stroke="url(#opGrad)" stroke-width="6"/>
+
+    <!-- arrow head extending up-right from top node -->
+    <path d="M 122 14 L 150 -10" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M 138 -10 L 150 -10 L 150 2" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g font-family="'Space Grotesk', 'DM Sans', system-ui, sans-serif" font-weight="700" font-size="92" letter-spacing="-3">
+    <text x="180" y="108" fill="#2e1065">Oper</text>
+    <text x="380" y="108" fill="#a78bfa">ai</text>
+    <rect x="380" y="118" width="76" height="6" rx="1" fill="#a78bfa"/>
+  </g>
+</svg>

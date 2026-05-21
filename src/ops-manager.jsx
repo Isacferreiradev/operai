@@ -1,32 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  LayoutGrid, 
-  KanbanSquare, 
-  Lightbulb, 
-  TrendingUp, 
-  BookOpen, 
-  Plus, 
-  Search, 
-  Edit, 
-  Trash2, 
-  ExternalLink, 
-  Clock, 
-  Sparkles, 
-  Filter, 
-  ArrowRight, 
-  ChevronDown, 
-  ChevronUp, 
-  Settings, 
-  DollarSign, 
-  CheckCircle2, 
-  Target, 
+import React, { useState, useEffect, createElement } from 'react';
+import {
+  LayoutGrid,
+  KanbanSquare,
+  Lightbulb,
+  TrendingUp,
+  BookOpen,
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  ExternalLink,
+  Clock,
+  Sparkles,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  DollarSign,
+  Target,
   X,
   FileText,
   Calendar,
-  AlertCircle,
   ToggleLeft,
   ToggleRight,
-  TrendingDown,
   Sun,
   Moon,
   Calculator,
@@ -39,7 +34,13 @@ import {
   Activity,
   Layers,
   LogOut,
-  RefreshCcw
+  RefreshCcw,
+  // Offer / category icons (replace user-facing emojis)
+  Grape, Hamburger, Coffee, Pickaxe, Pizza, Cake, Fish, Footprints, Shirt,
+  Gamepad2, Laptop, Smartphone, GraduationCap, Dumbbell, Palette, Plane, Coins,
+  // Tag / task / sort icons
+  Rocket, BarChart3, CheckCircle2, Star,
+  Package
 } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './supabase';
 
@@ -49,20 +50,137 @@ import { supabase, supabaseUrl, supabaseKey } from './supabase';
 const R = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const Pct = (v) => Number(v || 0).toFixed(1) + '%';
 const Roas = (v) => Number(v || 0).toFixed(2);
-const uid = () => Math.random().toString(36).substr(2, 9);
+const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
+
+// Compute days since a YYYY-MM-DD date. Negative => future.
+const daysSince = (dateStr) => {
+  if (!dateStr) return null;
+  const launchTime = new Date(dateStr + 'T00:00:00').getTime();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((today.getTime() - launchTime) / (1000 * 60 * 60 * 24));
+};
+
+const formatLaunchText = (dateStr) => {
+  if (!dateStr) return 'Não lançada';
+  const d = daysSince(dateStr);
+  if (d === 0) return 'Lançada hoje';
+  if (d > 0) return `Lançada há ${d} dia${d === 1 ? '' : 's'}`;
+  const future = Math.abs(d);
+  return `Lança em ${future} dia${future === 1 ? '' : 's'}`;
+};
 
 // ==========================================
-// INITIAL PRE-POPULATED DATA
+// ICON SYSTEM (replaces emojis)
 // ==========================================
-const INITIAL_OFFERS = [];
+const ICON_OPTIONS = [
+  { key: 'grape',     label: 'Frutas',          Icon: Grape },
+  { key: 'food',      label: 'Comida',          Icon: Hamburger },
+  { key: 'coffee',    label: 'Café / Bebida',   Icon: Coffee },
+  { key: 'mining',    label: 'Mineração',       Icon: Pickaxe },
+  { key: 'pizza',     label: 'Pizza',           Icon: Pizza },
+  { key: 'cake',      label: 'Doces',           Icon: Cake },
+  { key: 'fish',      label: 'Peixe / Sushi',   Icon: Fish },
+  { key: 'shoe',      label: 'Calçados',        Icon: Footprints },
+  { key: 'apparel',   label: 'Vestuário',       Icon: Shirt },
+  { key: 'game',      label: 'Games',           Icon: Gamepad2 },
+  { key: 'tech',      label: 'Tecnologia',      Icon: Laptop },
+  { key: 'mobile',    label: 'Mobile',          Icon: Smartphone },
+  { key: 'education', label: 'Educação',        Icon: GraduationCap },
+  { key: 'target',    label: 'Marketing',       Icon: Target },
+  { key: 'fitness',   label: 'Fitness',         Icon: Dumbbell },
+  { key: 'design',    label: 'Design',          Icon: Palette },
+  { key: 'travel',    label: 'Viagem',          Icon: Plane },
+  { key: 'money',     label: 'Finanças',        Icon: Coins },
+  { key: 'idea',      label: 'Ideias',          Icon: Lightbulb },
+  { key: 'hot',       label: 'Hot / Trend',     Icon: Flame },
+];
 
-const INITIAL_DAILY_DATA = [];
+const EMOJI_TO_ICON_KEY = {
+  '🍇': 'grape', '🍔': 'food', '☕': 'coffee', '⛏️': 'mining', '⛏': 'mining',
+  '🍕': 'pizza', '🍰': 'cake', '🍣': 'fish', '👟': 'shoe', '👕': 'apparel',
+  '🎮': 'game', '💻': 'tech', '📱': 'mobile', '📚': 'education', '🎯': 'target',
+  '🏋️': 'fitness', '🏋': 'fitness', '🎨': 'design', '✈️': 'travel', '✈': 'travel',
+  '💰': 'money', '💡': 'idea', '🔥': 'hot',
+};
 
-const INITIAL_TASKS = [];
+// Resolve an offer's icon. Prefers offer.icon (new), falls back to mapping legacy emoji, else Package.
+const resolveOfferIcon = (offer) => {
+  const key = offer?.icon || EMOJI_TO_ICON_KEY[offer?.emoji];
+  const match = ICON_OPTIONS.find(opt => opt.key === key);
+  return match ? match.Icon : Package;
+};
 
-const INITIAL_IDEAS = [];
+function OfferIcon({ offer, size = 16, color = 'currentColor', style }) {
+  return createElement(resolveOfferIcon(offer), { size, color, style });
+}
 
-const INITIAL_DIARY = [];
+function OfferLabel({ offer, iconSize = 14, style }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', ...style }}>
+      <OfferIcon offer={offer} size={iconSize} />
+      <span>{offer?.name}</span>
+    </span>
+  );
+}
+
+// Diary / Task tag icon system (replaces emoji prefixes)
+const DIARY_TAGS = [
+  { key: 'lancamento', label: 'Lançamento', Icon: Rocket },
+  { key: 'analise',    label: 'Análise',    Icon: BarChart3 },
+  { key: 'insight',    label: 'Insight',    Icon: Lightbulb },
+  { key: 'problema',   label: 'Problema',   Icon: AlertTriangle },
+  { key: 'decisao',    label: 'Decisão',    Icon: CheckCircle2 },
+  { key: 'resultado',  label: 'Resultado',  Icon: Flame },
+];
+const DIARY_TAG_MAP = Object.fromEntries(DIARY_TAGS.map(t => [t.key, t]));
+
+const TASK_TYPES = [
+  { key: 'criativo',   label: 'Criativo' },
+  { key: 'pagina',     label: 'Página' },
+  { key: 'setup',      label: 'Setup' },
+  { key: 'analise',    label: 'Análise' },
+  { key: 'lancamento', label: 'Lançamento' },
+  { key: 'fix',        label: 'Fix' },
+];
+
+// User avatar: tries /profile.jpg, falls back to gradient + initials on error
+function UserAvatar({ email }) {
+  const [errored, setErrored] = useState(false);
+  const initials = (email || '?').slice(0, 2).toUpperCase();
+  const sharedStyle = {
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    flex: '0 0 32px',
+    objectFit: 'cover',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden'
+  };
+  if (errored) {
+    return (
+      <div style={{
+        ...sharedStyle,
+        background: 'linear-gradient(135deg, var(--accent2) 0%, var(--accent) 100%)',
+        fontSize: '12px',
+        fontWeight: 'bold',
+        color: '#fff'
+      }}>
+        {initials}
+      </div>
+    );
+  }
+  return (
+    <img
+      src="/profile.jpg"
+      alt={email || 'Avatar'}
+      onError={() => setErrored(true)}
+      style={sharedStyle}
+    />
+  );
+}
 
 // ==========================================
 // CORE APP COMPONENT
@@ -78,49 +196,58 @@ export default function App({ session, cloudState }) {
     return saved ? saved : 'light'; 
   });
 
-  // Data States
+  // Data States — cloudState is loaded BEFORE this component mounts (see main.jsx).
+  // localStorage is only a fallback for pre-cloud users or transient cloud nulls.
   const [offers, setOffers] = useState(() => {
-    if (cloudState && cloudState.offers) return cloudState.offers;
+    if (cloudState?.offers) return cloudState.offers;
     const saved = localStorage.getItem('ops_offers');
-    const parsed = saved ? JSON.parse(saved) : INITIAL_OFFERS;
-    return parsed.filter(o => o.id !== '1' && o.id !== '2' && o.id !== '3' && o.id !== '4');
+    return saved ? JSON.parse(saved) : [];
   });
-  
+
   const [dailyData, setDailyData] = useState(() => {
-    if (cloudState && cloudState.dailyData) return cloudState.dailyData;
+    if (cloudState?.dailyData) return cloudState.dailyData;
     const saved = localStorage.getItem('ops_daily_data');
-    const parsed = saved ? JSON.parse(saved) : INITIAL_DAILY_DATA;
-    return parsed.filter(d => !['d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10', 'd11'].includes(d.id));
+    return saved ? JSON.parse(saved) : [];
   });
-  
+
   const [tasks, setTasks] = useState(() => {
-    if (cloudState && cloudState.tasks) return cloudState.tasks;
+    if (cloudState?.tasks) return cloudState.tasks;
     const saved = localStorage.getItem('ops_tasks');
-    const parsed = saved ? JSON.parse(saved) : INITIAL_TASKS;
-    return parsed.filter(t => !['t1', 't2', 't3', 't4', 't5'].includes(t.id));
+    return saved ? JSON.parse(saved) : [];
   });
-  
+
   const [ideas, setIdeas] = useState(() => {
-    if (cloudState && cloudState.ideas) return cloudState.ideas;
+    if (cloudState?.ideas) return cloudState.ideas;
     const saved = localStorage.getItem('ops_ideas');
-    const parsed = saved ? JSON.parse(saved) : INITIAL_IDEAS;
-    return parsed.filter(i => !['i1', 'i2', 'i3'].includes(i.id));
+    return saved ? JSON.parse(saved) : [];
   });
-  
+
   const [diary, setDiary] = useState(() => {
-    if (cloudState && cloudState.diary) return cloudState.diary;
+    if (cloudState?.diary) return cloudState.diary;
     const saved = localStorage.getItem('ops_diary');
-    const parsed = saved ? JSON.parse(saved) : INITIAL_DIARY;
-    return parsed.filter(y => !['y1', 'y2', 'y3'].includes(y.id));
+    return saved ? JSON.parse(saved) : [];
   });
+
+  const [globalDailyGoal, setGlobalDailyGoal] = useState(() => {
+    if (typeof cloudState?.globalDailyGoal === 'number') return cloudState.globalDailyGoal;
+    const saved = localStorage.getItem('ops_global_goal');
+    return saved ? Number(saved) : 1000;
+  });
+
+  // Session-only alert dismissals (key: alert content hash)
+  const [dismissedAlerts, setDismissedAlerts] = useState(new Set());
 
   // UI Modals / Drawers States
   const [isNewOfferModalOpen, setIsNewOfferModalOpen] = useState(false);
+  const [offerModalPrefill, setOfferModalPrefill] = useState(null); // { fromIdea, ...prefilled fields }
   const [selectedOfferIdForDrawer, setSelectedOfferIdForDrawer] = useState(null);
   const [isDailyDataDrawerOpen, setIsDailyDataDrawerOpen] = useState(false);
+  const [editingDailyRecord, setEditingDailyRecord] = useState(null);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [isNewIdeaModalOpen, setIsNewIdeaModalOpen] = useState(false);
   const [isNewDiaryModalOpen, setIsNewDiaryModalOpen] = useState(false);
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  const [creativeModalState, setCreativeModalState] = useState(null); // { offerId, creative? }
 
   // Edit States
   const [editingTask, setEditingTask] = useState(null);
@@ -130,10 +257,11 @@ export default function App({ session, cloudState }) {
 
   // Filter States
   const [pipelineFilter, setPipelineFilter] = useState('todos'); // 'todos' | 'ativas' | 'pausadas' | 'mortas'
-  const [kanbanOfferFilter, setKanbanOfferFilter] = useState('all');
+  const [kanbanOfferFilter, setKanbanOfferFilter] = useState('all'); // 'all' | 'none' | offerId
   const [diaryTagFilter, setDiaryTagFilter] = useState('all');
   const [diaryOfferFilter, setDiaryOfferFilter] = useState('all');
   const [diarySearchQuery, setDiarySearchQuery] = useState('');
+  const [showAutoDiary, setShowAutoDiary] = useState(true);
   
   // Sorting State for Ideas
   const [ideasSortBy, setIdeasSortBy] = useState('potential'); // 'potential' | 'effort' | 'date'
@@ -144,42 +272,35 @@ export default function App({ session, cloudState }) {
   // Refs for tracking changes and triggering sync on window unload
   const payloadRef = React.useRef(null);
   const isDirtyRef = React.useRef(false);
+  const isFirstSyncRef = React.useRef(true);
+  const userId = session?.user?.id;
+  const accessToken = session?.access_token;
 
-  // Setup beforeunload listener for immediate sync on tab close/refresh
+  // beforeunload: silently flush pending changes via keepalive fetch (no warning popup)
   useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (isDirtyRef.current && payloadRef.current && session?.user?.id) {
-        // Prevent unload to give the user a warning and block data loss
-        e.preventDefault();
-        e.returnValue = '';
-
-        const url = `${supabaseUrl}/rest/v1/user_app_state`;
-        const body = JSON.stringify({
-          user_id: session.user.id,
-          app_state: payloadRef.current,
-          updated_at: new Date().toISOString()
-        });
-
-        // Use native fetch with keepalive to ensure execution during page unload
-        fetch(url, {
+    const handleBeforeUnload = () => {
+      if (!isDirtyRef.current || !payloadRef.current || !userId) return;
+      try {
+        fetch(`${supabaseUrl}/rest/v1/user_app_state`, {
           method: 'POST',
           keepalive: true,
           headers: {
             'apikey': supabaseKey,
-            'Authorization': `Bearer ${session.access_token}`,
+            'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
             'Prefer': 'resolution=merge-duplicates'
           },
-          body: body
-        }).catch(err => console.error('Unload sync failed:', err));
-      }
+          body: JSON.stringify({
+            user_id: userId,
+            app_state: payloadRef.current,
+            updated_at: new Date().toISOString()
+          })
+        }).catch(() => {});
+      } catch { /* swallow */ }
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [session]);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [userId, accessToken]);
 
   // Persistent Storage & Cloud Sync
   useEffect(() => {
@@ -189,43 +310,39 @@ export default function App({ session, cloudState }) {
     localStorage.setItem('ops_tasks', JSON.stringify(tasks));
     localStorage.setItem('ops_ideas', JSON.stringify(ideas));
     localStorage.setItem('ops_diary', JSON.stringify(diary));
+    localStorage.setItem('ops_global_goal', String(globalDailyGoal));
 
-    // Update payload ref for window unload sync
-    const payload = {
-      theme,
-      offers,
-      dailyData,
-      tasks,
-      ideas,
-      diary
-    };
+    const payload = { theme, offers, dailyData, tasks, ideas, diary, globalDailyGoal };
     payloadRef.current = payload;
+
+    // Skip cloud sync on first mount — data we just received from cloud doesn't need to be sent back
+    if (isFirstSyncRef.current) {
+      isFirstSyncRef.current = false;
+      return;
+    }
+
     isDirtyRef.current = true;
 
-    // Supabase Cloud Sync (Debounced)
     const syncToCloud = async () => {
       setIsSyncing(true);
-      
       const { error } = await supabase
         .from('user_app_state')
         .upsert({
-          user_id: session.user.id,
+          user_id: userId,
           app_state: payload,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
-        
       if (error) {
         console.error('Error syncing to cloud:', error);
       } else {
         isDirtyRef.current = false;
       }
-      
-      setTimeout(() => setIsSyncing(false), 500); // Visual delay for feedback
+      setIsSyncing(false);
     };
 
-    const debounceTimer = setTimeout(syncToCloud, 300); // Wait 300ms after last change before syncing
+    const debounceTimer = setTimeout(syncToCloud, 600);
     return () => clearTimeout(debounceTimer);
-  }, [theme, offers, dailyData, tasks, ideas, diary, session]);
+  }, [theme, offers, dailyData, tasks, ideas, diary, globalDailyGoal, userId]);
 
   // ==========================================
   // CALCULATIONS / METRICS
@@ -269,7 +386,6 @@ export default function App({ session, cloudState }) {
   const totalSpend = dailyData.reduce((s, d) => s + Number(d.adSpend || 0), 0);
   const totalProfit = totalRevenue - totalSpend;
   const averageRoas = totalSpend > 0 ? totalRevenue / totalSpend : 0;
-  const totalSales = dailyData.reduce((s, d) => s + Number(d.sales || 0), 0);
 
   // Best/Worst offer today
   let bestOffer = { name: 'Sem dados', profit: 0 };
@@ -277,7 +393,9 @@ export default function App({ session, cloudState }) {
   
   if (offers.length > 0) {
     const activeStats = offers.map(o => ({
-      name: `${o.emoji} ${o.name}`,
+      id: o.id,
+      offer: o,
+      name: o.name,
       profit: getOfferStats(o.id).profit
     }));
     
@@ -292,18 +410,15 @@ export default function App({ session, cloudState }) {
 
   // Get daily profit and spend trend of all offers combined over the last 7 active dates
   const uniqueDates = Array.from(new Set(dailyData.map(d => d.date))).sort().slice(-7);
-  const last7DaysOverallList = [];
   const chartData = uniqueDates.map(date => {
     const dayRecords = dailyData.filter(d => d.date === date);
     const rev = dayRecords.reduce((s, r) => s + Number(r.revenue || 0), 0);
     const spend = dayRecords.reduce((s, r) => s + Number(r.adSpend || 0), 0);
-    const profit = rev - spend;
-    last7DaysOverallList.push(profit);
-    return { date, revenue: rev, spend, profit };
+    return { date, revenue: rev, spend, profit: rev - spend };
   });
 
-  const overallDailyAvg = last7DaysOverallList.length > 0 
-    ? last7DaysOverallList.reduce((s, v) => s + v, 0) / last7DaysOverallList.length 
+  const overallDailyAvg = chartData.length > 0
+    ? chartData.reduce((s, d) => s + d.profit, 0) / chartData.length
     : 0;
 
   // ==========================================
@@ -312,60 +427,66 @@ export default function App({ session, cloudState }) {
   const getCriticalAlerts = () => {
     const alerts = [];
 
-    // 1. Low ROAS Alert on active offers
     offers.filter(o => o.status === 'ativa').forEach(o => {
       const stats = getOfferStats(o.id);
-      // Only check if they actually have spend
       if (stats.spend > 0 && stats.roas < 1.3) {
         alerts.push({
+          id: `roas-${o.id}`,
           type: 'danger',
-          message: `ROAS crítico na oferta "${o.emoji} ${o.name}": ROAS de ${Roas(stats.roas)}x está abaixo da linha de break-even (1.3x). Revise seus anúncios imediatamente!`
+          message: `ROAS crítico na oferta "${o.name}": ROAS de ${Roas(stats.roas)}x está abaixo da linha de break-even (1.3x). Revise seus anúncios imediatamente!`
         });
       }
     });
 
-    // 2. Active offers without creative validation
     offers.filter(o => o.status === 'ativa' && o.stage !== 'ideia').forEach(o => {
       const activeCreatives = o.creatives ? o.creatives.filter(c => c.status === 'ativo') : [];
       if (activeCreatives.length === 0) {
         alerts.push({
+          id: `no-creatives-${o.id}`,
           type: 'warning',
-          message: `Oferta ativa "${o.emoji} ${o.name}" está sem nenhum criativo ativado! Suba criativos para rodar tráfego.`
+          message: `Oferta ativa "${o.name}" está sem nenhum criativo ativado! Suba criativos para rodar tráfego.`
         });
       }
     });
 
-    // 3. Checklist tasks not done on testing/scaling stages
     offers.filter(o => o.status === 'ativa' && (o.stage === 'testando' || o.stage === 'escalando')).forEach(o => {
       if (o.checklist) {
         const missingItems = [];
         if (!o.checklist.pixel) missingItems.push('Pixel de conversão');
         if (!o.checklist.checkout) missingItems.push('Checkout básico');
-        
         if (missingItems.length > 0) {
           alerts.push({
+            id: `checklist-${o.id}`,
             type: 'warning',
-            message: `Checkout / Rastreamento pendente no produto "${o.emoji} ${o.name}": Falta configurar ${missingItems.join(' e ')}.`
+            message: `Checkout / Rastreamento pendente no produto "${o.name}": Falta configurar ${missingItems.join(' e ')}.`
           });
         }
       }
     });
 
-    // 4. Overdue tasks in Kanban
     tasks.filter(t => t.column !== 'done' && t.deadline).forEach(t => {
       const todayStr = new Date().toISOString().split('T')[0];
       if (t.deadline < todayStr) {
         alerts.push({
+          id: `overdue-${t.id}`,
           type: 'danger',
           message: `Tarefa atrasada: "${t.title}" venceu em ${new Date(t.deadline + 'T00:00:00').toLocaleDateString('pt-BR')}!`
         });
       }
     });
 
-    return alerts;
+    return alerts.filter(a => !dismissedAlerts.has(a.id));
   };
 
   const criticalAlertsList = getCriticalAlerts();
+
+  const dismissAlert = (alertId) => {
+    setDismissedAlerts(prev => {
+      const next = new Set(prev);
+      next.add(alertId);
+      return next;
+    });
+  };
 
   // ==========================================
   // DRAG & DROP FOR KANBAN
@@ -404,11 +525,13 @@ export default function App({ session, cloudState }) {
     const newOffer = {
       id: uid(),
       name: formData.name,
-      emoji: formData.emoji || '🍇',
+      emoji: formData.emoji,
+      icon: formData.icon || 'grape',
       type: formData.type || 'outro',
       niche: formData.niche,
       stage: formData.stage || 'ideia',
       status: formData.stage === 'pausada' || formData.stage === 'morta' ? formData.stage : 'ativa',
+      previousStage: null,
       pageUrl: formData.pageUrl,
       checkoutBasicUrl: formData.checkoutBasicUrl,
       checkoutCompleteUrl: formData.checkoutCompleteUrl || '',
@@ -430,14 +553,21 @@ export default function App({ session, cloudState }) {
     };
     setOffers(prev => [newOffer, ...prev]);
     setIsNewOfferModalOpen(false);
+    setOfferModalPrefill(null);
 
     setDiary(prev => [{
       id: uid(),
-      text: `Criada nova oferta "${newOffer.emoji} ${newOffer.name}" no estágio "${newOffer.stage.toUpperCase()}".`,
+      text: `Criada nova oferta "${newOffer.name}" no estágio "${newOffer.stage.toUpperCase()}".`,
       tag: 'lancamento',
       offerId: newOffer.id,
+      isAuto: true,
       createdAt: new Date().toISOString()
     }, ...prev]);
+
+    // If this offer was created from an idea, remove the idea now
+    if (formData.fromIdeaId) {
+      setIdeas(prev => prev.filter(i => i.id !== formData.fromIdeaId));
+    }
   };
 
   const handleUpdateOffer = (updated) => {
@@ -446,7 +576,22 @@ export default function App({ session, cloudState }) {
   };
 
   const handleDeleteOffer = (offerId) => {
-    if (confirm('Tem certeza que deseja excluir esta oferta e todos os seus dados vinculados?')) {
+    const offer = offers.find(o => o.id === offerId);
+    if (!offer) return;
+    const linkedDaily = dailyData.filter(d => d.offerId === offerId).length;
+    const linkedTasks = tasks.filter(t => t.offerId === offerId).length;
+    const linkedDiary = diary.filter(dy => dy.offerId === offerId).length;
+    const summary = [
+      `Deletar a oferta "${offer.name}"?`,
+      '',
+      'Também serão removidos PERMANENTEMENTE:',
+      `• ${linkedDaily} registro(s) diário(s)`,
+      `• ${linkedTasks} tarefa(s) vinculada(s)`,
+      `• ${linkedDiary} entrada(s) do diário`,
+      '',
+      'Esta ação não pode ser desfeita.'
+    ].join('\n');
+    if (confirm(summary)) {
       setOffers(prev => prev.filter(o => o.id !== offerId));
       setDailyData(prev => prev.filter(d => d.offerId !== offerId));
       setTasks(prev => prev.filter(t => t.offerId !== offerId));
@@ -476,11 +621,24 @@ export default function App({ session, cloudState }) {
 
     setDiary(prev => [{
       id: uid(),
-      text: `Dados diários registrados para ${offerObj ? offerObj.emoji + ' ' + offerObj.name : 'Oferta'}. Faturamento: ${R(newRecord.revenue)}, Gastos: ${R(newRecord.adSpend)}, Lucro: ${R(profit)}, ROAS: ${roas}. Observação: ${newRecord.notes || 'Sem observações.'}`,
+      text: `Dados diários registrados para ${offerObj ? offerObj.name : 'Oferta'}. Faturamento: ${R(newRecord.revenue)}, Gastos: ${R(newRecord.adSpend)}, Lucro: ${R(profit)}, ROAS: ${roas}. Observação: ${newRecord.notes || 'Sem observações.'}`,
       tag: 'analise',
       offerId: formData.offerId,
+      isAuto: true,
       createdAt: new Date().toISOString()
     }, ...prev]);
+  };
+
+  const handleUpdateDailyRecord = (updated) => {
+    setDailyData(prev => prev.map(d => d.id === updated.id ? {
+      ...d,
+      ...updated,
+      revenue: Number(updated.revenue || 0),
+      adSpend: Number(updated.adSpend || 0),
+      sales: Number(updated.sales || 0),
+      bumps: Number(updated.bumps || 0)
+    } : d));
+    setEditingDailyRecord(null);
   };
 
   const handleDeleteDailyRecord = (recordId) => {
@@ -489,23 +647,34 @@ export default function App({ session, cloudState }) {
     }
   };
 
-  const handleAddCreative = (offerId, name, roas, notes) => {
-    const newCreative = {
-      id: uid(),
-      name,
-      status: 'ativo',
-      roas: Number(roas || 0),
-      notes
-    };
+  const handleSaveCreative = (offerId, payload) => {
+    const isEdit = !!payload.id;
     setOffers(prev => prev.map(o => {
-      if (o.id === offerId) {
+      if (o.id !== offerId) return o;
+      const existing = o.creatives || [];
+      if (isEdit) {
         return {
           ...o,
-          creatives: [...(o.creatives || []), newCreative]
+          creatives: existing.map(c => c.id === payload.id ? {
+            ...c,
+            name: payload.name,
+            roas: Number(payload.roas || 0),
+            notes: payload.notes || ''
+          } : c)
         };
       }
-      return o;
+      return {
+        ...o,
+        creatives: [...existing, {
+          id: uid(),
+          name: payload.name,
+          status: 'ativo',
+          roas: Number(payload.roas || 0),
+          notes: payload.notes || ''
+        }]
+      };
     }));
+    setCreativeModalState(null);
   };
 
   const handleToggleCreative = (offerId, creativeId) => {
@@ -590,46 +759,18 @@ export default function App({ session, cloudState }) {
   };
 
   const handleMoveIdeaToPipeline = (idea) => {
-    const newOffer = {
-      id: uid(),
+    const tagText = idea.tags && idea.tags.length > 0 ? `\nTags da ideia: ${idea.tags.map(t => '#' + t).join(' ')}` : '';
+    const notesText = idea.notes ? `\nNotas originais: ${idea.notes}` : '';
+    setOfferModalPrefill({
+      fromIdeaId: idea.id,
       name: idea.name,
-      emoji: '💡',
-      type: idea.type || 'outro',
-      niche: idea.description,
+      type: idea.type || 'pack_artes',
+      niche: idea.description || '',
       stage: 'ideia',
-      status: 'ativa',
-      pageUrl: '',
-      checkoutBasicUrl: '',
-      checkoutCompleteUrl: '',
       dailyProfitGoal: 100,
-      launchDate: null,
-      notes: `Convertido a partir de ideia. Notas originais: ${idea.notes}`,
-      checklist: {
-        entregavel: false,
-        pagina: false,
-        checkout: false,
-        pixel: false,
-        criativos: false,
-        campanhas: false,
-        bumps: false
-      },
-      creatives: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    setOffers(prev => [newOffer, ...prev]);
-    setIdeas(prev => prev.filter(i => i.id !== idea.id));
-
-    setDiary(prev => [{
-      id: uid(),
-      text: `Mapeou a ideia "${idea.name}" para o Pipeline no estágio IDEIA.`,
-      tag: 'insight',
-      offerId: newOffer.id,
-      createdAt: new Date().toISOString()
-    }, ...prev]);
-    
-    setActivePage('pipeline');
+      notes: `Convertido a partir de ideia.${notesText}${tagText}`.trim()
+    });
+    setIsNewOfferModalOpen(true);
   };
 
   const handleCreateDiary = (formData) => {
@@ -660,7 +801,7 @@ export default function App({ session, cloudState }) {
     const content = diary.map(dy => {
       const offer = offers.find(o => o.id === dy.offerId);
       const dateStr = new Date(dy.createdAt).toLocaleString('pt-BR');
-      return `[${dateStr}] [${dy.tag.toUpperCase()}] ${offer ? `(${offer.emoji} ${offer.name})` : ''}\n${dy.text}\n----------------------------------------\n`;
+      return `[${dateStr}] [${dy.tag.toUpperCase()}] ${offer ? `(${offer.name})` : ''}\n${dy.text}\n----------------------------------------\n`;
     }).join('\n');
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -680,20 +821,19 @@ export default function App({ session, cloudState }) {
       {/* ────────────────── SIDEBAR ────────────────── */}
       <aside className="sidebar">
         <div>
-          {/* Logo with indigo->purple gradient */}
+          {/* Operai logo */}
           <div style={{
-            fontFamily: "'Space Grotesk', sans-serif",
-            fontWeight: 700,
-            fontSize: '24px',
-            background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            letterSpacing: '0.1em',
-            padding: '8px 12px',
-            marginBottom: '16px',
-            borderBottom: '1px solid var(--border)'
+            padding: '8px 8px 14px 8px',
+            marginBottom: '12px',
+            borderBottom: '1px solid var(--border)',
+            display: 'flex',
+            justifyContent: 'center'
           }}>
-            OPS
+            <img
+              src="/operai-logo.svg"
+              alt="Operai"
+              style={{ width: '100%', maxWidth: '160px', height: 'auto', display: 'block' }}
+            />
           </div>
 
           {/* Navigation Links */}
@@ -849,22 +989,11 @@ export default function App({ session, cloudState }) {
             padding: '12px 6px',
             borderTop: '1px solid var(--border)'
           }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, var(--accent2) 0%, var(--accent) 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '12px',
-              fontWeight: 'bold',
-              color: '#fff'
-            }}>
-              IS
-            </div>
+            <UserAvatar email={session?.user?.email} />
             <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>Isac</span>
+              <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }} title={session?.user?.email}>
+                {(session?.user?.email || '').split('@')[0] || 'Usuário'}
+              </span>
               <span style={{ fontSize: '10px', color: 'var(--text2)', whiteSpace: 'nowrap' }}>
                 {isSyncing ? (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--accent)' }}>
@@ -911,18 +1040,22 @@ export default function App({ session, cloudState }) {
 
           {/* Goal Progress bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+            <div
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', cursor: 'pointer' }}
+              onClick={() => setIsGoalModalOpen(true)}
+              title="Clique para editar a meta diária"
+            >
               <div style={{ display: 'flex', gap: '8px', fontSize: '11px', fontWeight: '500' }}>
-                <span style={{ color: 'var(--text2)' }}>Meta R$1.000/dia:</span>
-                <span style={{ color: overallDailyAvg >= 1000 ? 'var(--green)' : 'var(--yellow)' }}>
-                  {R(overallDailyAvg)}/dia ({Pct((overallDailyAvg / 1000) * 100)})
+                <span style={{ color: 'var(--text2)' }}>Meta {R(globalDailyGoal)}/dia:</span>
+                <span style={{ color: overallDailyAvg >= globalDailyGoal ? 'var(--green)' : 'var(--yellow)' }}>
+                  {R(overallDailyAvg)}/dia ({Pct((overallDailyAvg / (globalDailyGoal || 1)) * 100)})
                 </span>
               </div>
               <div style={{ width: '120px', height: '4px', backgroundColor: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{ 
-                  width: `${Math.min(100, (overallDailyAvg / 1000) * 100)}%`, 
-                  height: '100%', 
-                  backgroundColor: overallDailyAvg >= 1000 ? 'var(--green)' : 'var(--accent)',
+                <div style={{
+                  width: `${Math.min(100, (overallDailyAvg / (globalDailyGoal || 1)) * 100)}%`,
+                  height: '100%',
+                  backgroundColor: overallDailyAvg >= globalDailyGoal ? 'var(--green)' : 'var(--accent)',
                   transition: 'width 0.3s ease'
                 }} />
               </div>
@@ -969,10 +1102,10 @@ export default function App({ session, cloudState }) {
               {/* Critical alerts banner (if any) */}
               {criticalAlertsList.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {criticalAlertsList.map((alert, idx) => (
-                    <div 
-                      key={idx} 
-                      style={{ 
+                  {criticalAlertsList.map((alert) => (
+                    <div
+                      key={alert.id}
+                      style={{
                         backgroundColor: alert.type === 'danger' ? 'var(--red-dim)' : 'var(--yellow-dim)',
                         border: `1px solid ${alert.type === 'danger' ? 'var(--red)' : 'var(--yellow)'}`,
                         color: alert.type === 'danger' ? 'var(--red)' : 'var(--yellow)',
@@ -986,7 +1119,14 @@ export default function App({ session, cloudState }) {
                       }}
                     >
                       <AlertTriangle size={16} />
-                      <span>{alert.message}</span>
+                      <span style={{ flex: 1 }}>{alert.message}</span>
+                      <button
+                        onClick={() => dismissAlert(alert.id)}
+                        title="Dispensar este alerta"
+                        style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0, opacity: 0.7 }}
+                      >
+                        <X size={14} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1114,7 +1254,7 @@ export default function App({ session, cloudState }) {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                               <span>{task.title}</span>
                               <span style={{ fontSize: '10px', color: 'var(--text3)' }}>
-                                {linkedOffer ? `${linkedOffer.emoji} ${linkedOffer.name}` : 'Geral'}
+                                {linkedOffer ? <OfferLabel offer={linkedOffer} iconSize={10} /> : 'Geral'}
                               </span>
                             </div>
                             <span className={`badge ${task.priority === 'alta' ? 'badge-red' : 'badge-yellow'}`} style={{ scale: '0.8' }}>
@@ -1259,12 +1399,7 @@ export default function App({ session, cloudState }) {
                           const profitGoal = offer.dailyProfitGoal || 1;
                           const progressPercentage = Math.min(100, Math.round((stats.dailyAvgProfit / profitGoal) * 100));
 
-                          let launchDaysText = 'Não lançada';
-                          if (offer.launchDate) {
-                            const diffTime = Math.abs(new Date() - new Date(offer.launchDate));
-                            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                            launchDaysText = `Lançada há ${diffDays} dias`;
-                          }
+                          const launchDaysText = formatLaunchText(offer.launchDate);
 
                           return (
                             <div 
@@ -1280,7 +1415,7 @@ export default function App({ session, cloudState }) {
                               {/* Title line */}
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                                 <h4 style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  <span>{offer.emoji}</span>
+                                  <OfferIcon offer={offer} size={14} color="var(--accent)" />
                                   <span>{offer.name}</span>
                                 </h4>
                                 <div style={{ display: 'flex', gap: '4px' }}>
@@ -1299,7 +1434,7 @@ export default function App({ session, cloudState }) {
 
                               {/* Details Type / Status */}
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text2)', marginBottom: '8px' }}>
-                                <span>{offer.type === 'pack_artes' ? 'Pack Artes' : offer.type.toUpperCase()}</span>
+                                <span>{offer.type === 'pack_artes' ? 'Pack Artes' : (offer.type || 'outro').toUpperCase()}</span>
                                 <span className={`badge ${offer.status === 'ativa' ? 'badge-green' : offer.status === 'pausada' ? 'badge-yellow' : 'badge-red'}`} style={{ transform: 'scale(0.85)', transformOrigin: 'right center', padding: '0px 4px' }}>
                                   {offer.status}
                                 </span>
@@ -1396,14 +1531,15 @@ export default function App({ session, cloudState }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                   <span style={{ fontSize: '13px', color: 'var(--text2)', fontWeight: '500' }}>Filtrar por Oferta:</span>
-                  <select 
-                    value={kanbanOfferFilter} 
+                  <select
+                    value={kanbanOfferFilter}
                     onChange={(e) => setKanbanOfferFilter(e.target.value)}
                     style={{ width: '180px', padding: '6px 12px' }}
                   >
                     <option value="all">Todas as Ofertas</option>
+                    <option value="none">Apenas Gerais (sem oferta)</option>
                     {offers.map(o => (
-                      <option key={o.id} value={o.id}>{o.emoji} {o.name}</option>
+                      <option key={o.id} value={o.id}>{o.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1419,6 +1555,7 @@ export default function App({ session, cloudState }) {
                 ].map(col => {
                   const colTasks = tasks.filter(t => {
                     if (t.column !== col.id) return false;
+                    if (kanbanOfferFilter === 'none') return !t.offerId;
                     if (kanbanOfferFilter !== 'all' && t.offerId !== kanbanOfferFilter) return false;
                     return true;
                   });
@@ -1541,9 +1678,9 @@ export default function App({ session, cloudState }) {
                     onChange={(e) => setIdeasSortBy(e.target.value)}
                     style={{ width: '150px', padding: '6px 12px' }}
                   >
-                    <option value="potential">Potencial ⭐</option>
-                    <option value="effort">Menor Esforço ⚡</option>
-                    <option value="date">Mais Recente 📅</option>
+                    <option value="potential">Maior Potencial</option>
+                    <option value="effort">Menor Esforço</option>
+                    <option value="date">Mais Recente</option>
                   </select>
                 </div>
               </div>
@@ -1567,7 +1704,7 @@ export default function App({ session, cloudState }) {
                           {/* Idea Title */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                             <h3 style={{ fontSize: '15px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span>💡</span>
+                              <Lightbulb size={16} color="var(--yellow)" />
                               <span>{idea.name}</span>
                             </h3>
                             <div style={{ display: 'flex', gap: '4px' }}>
@@ -1604,8 +1741,15 @@ export default function App({ session, cloudState }) {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', marginBottom: '12px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ color: 'var(--text3)' }}>Potencial:</span>
-                              <span style={{ color: 'var(--yellow)', letterSpacing: '2px' }}>
-                                {'★'.repeat(idea.potential)}{'☆'.repeat(5 - idea.potential)}
+                              <span style={{ display: 'inline-flex', gap: '2px' }}>
+                                {[1, 2, 3, 4, 5].map(v => (
+                                  <Star
+                                    key={v}
+                                    size={12}
+                                    color={v <= idea.potential ? 'var(--yellow)' : 'var(--border2)'}
+                                    fill={v <= idea.potential ? 'var(--yellow)' : 'none'}
+                                  />
+                                ))}
                               </span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1644,8 +1788,8 @@ export default function App({ session, cloudState }) {
                             </div>
                           )}
 
-                          <button 
-                            className="btn btn-primary" 
+                          <button
+                            className="btn btn-primary"
                             onClick={() => handleMoveIdeaToPipeline(idea)}
                             style={{ width: '100%', fontSize: '11px', padding: '6px' }}
                           >
@@ -1655,6 +1799,11 @@ export default function App({ session, cloudState }) {
                       </div>
                     );
                   })}
+                {ideas.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1', padding: '36px', textAlign: 'center', color: 'var(--text3)', border: '1px dashed var(--border)', borderRadius: '8px' }}>
+                    Nenhuma ideia cadastrada. Clique em "Nova Ideia" para começar.
+                  </div>
+                )}
               </div>
 
             </div>
@@ -1685,14 +1834,14 @@ export default function App({ session, cloudState }) {
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <span style={{ fontSize: '11px', color: 'var(--text2)', fontFamily: 'Space Grotesk' }}>MELHOR OFERTA (Lucro)</span>
                   <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--green)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {bestOffer.name}
+                    {bestOffer.offer ? <OfferLabel offer={bestOffer.offer} iconSize={13} /> : bestOffer.name}
                   </span>
                   <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{R(bestOffer.profit)}</span>
                 </div>
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <span style={{ fontSize: '11px', color: 'var(--text2)', fontFamily: 'Space Grotesk' }}>PIOR OFERTA (Lucro)</span>
                   <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--red)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {worstOffer.name}
+                    {worstOffer.offer ? <OfferLabel offer={worstOffer.offer} iconSize={13} /> : worstOffer.name}
                   </span>
                   <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{R(worstOffer.profit)}</span>
                 </div>
@@ -1725,8 +1874,8 @@ export default function App({ session, cloudState }) {
                         
                         let launchDays = '—';
                         if (offer.launchDate) {
-                          const diffTime = Math.abs(new Date() - new Date(offer.launchDate));
-                          launchDays = `${Math.ceil(diffTime / (1000 * 60 * 60 * 24))}d`;
+                          const d = daysSince(offer.launchDate);
+                          launchDays = d === null ? '—' : (d >= 0 ? `${d}d` : `+${Math.abs(d)}d`);
                         }
 
                         const sparkWidth = 80;
@@ -1753,7 +1902,7 @@ export default function App({ session, cloudState }) {
                         return (
                           <tr key={offer.id} style={{ borderBottom: '1px solid var(--border)', transition: 'background-color 150ms' }} className="table-row-hover">
                             <td style={{ padding: '12px 16px', fontWeight: 'bold' }}>
-                              {offer.emoji} {offer.name}
+                              <OfferLabel offer={offer} iconSize={14} />
                             </td>
                             <td style={{ padding: '12px 16px' }}>
                               <span className="badge badge-gray">{offer.stage}</span>
@@ -1803,9 +1952,9 @@ export default function App({ session, cloudState }) {
                   const stats = getOfferStats(offer.id);
 
                   return (
-                    <AccordionItem 
-                      key={offer.id} 
-                      title={`${offer.emoji} ${offer.name}`}
+                    <AccordionItem
+                      key={offer.id}
+                      title={<OfferLabel offer={offer} iconSize={14} />}
                       subtitle={`Faturamento: ${R(stats.revenue)} | Gastos: ${R(stats.spend)} | Lucro: ${R(stats.profit)}`}
                     >
                       {/* Detailed SVG Chart */}
@@ -1894,9 +2043,9 @@ export default function App({ session, cloudState }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               
               {/* Toolbar */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: '2fr 1fr 1fr 120px', 
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '2fr 1fr 1fr auto 120px',
                 gap: '12px',
                 alignItems: 'center',
                 backgroundColor: 'var(--bg2)',
@@ -1919,21 +2068,30 @@ export default function App({ session, cloudState }) {
                 {/* Filter tags */}
                 <select value={diaryTagFilter} onChange={(e) => setDiaryTagFilter(e.target.value)}>
                   <option value="all">Todas as Tags</option>
-                  <option value="lancamento">🚀 Lançamento</option>
-                  <option value="analise">📊 Análise</option>
-                  <option value="insight">💡 Insight</option>
-                  <option value="problema">⚠️ Problema</option>
-                  <option value="decisao">✅ Decisão</option>
-                  <option value="resultado">🔥 Resultado</option>
+                  {DIARY_TAGS.map(t => (
+                    <option key={t.key} value={t.key}>{t.label}</option>
+                  ))}
                 </select>
 
                 {/* Filter offer */}
                 <select value={diaryOfferFilter} onChange={(e) => setDiaryOfferFilter(e.target.value)}>
                   <option value="all">Todas as Ofertas</option>
                   {offers.map(o => (
-                    <option key={o.id} value={o.id}>{o.emoji} {o.name}</option>
+                    <option key={o.id} value={o.id}>{o.name}</option>
                   ))}
                 </select>
+
+                {/* Auto entries toggle */}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowAutoDiary(v => !v)}
+                  style={{ height: '38px', fontSize: '11px', whiteSpace: 'nowrap', padding: '0 10px' }}
+                  title={showAutoDiary ? 'Esconder entradas geradas automaticamente' : 'Mostrar entradas automáticas'}
+                >
+                  {showAutoDiary ? <ToggleRight size={14} color="var(--green)" /> : <ToggleLeft size={14} color="var(--text3)" />}
+                  Automáticas
+                </button>
 
                 {/* Export TXT */}
                 <button className="btn btn-secondary" onClick={handleExportDiary} style={{ height: '38px', fontSize: '12px' }}>
@@ -1945,6 +2103,7 @@ export default function App({ session, cloudState }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {diary
                   .filter(dy => {
+                    if (!showAutoDiary && dy.isAuto) return false;
                     if (diarySearchQuery && !dy.text.toLowerCase().includes(diarySearchQuery.toLowerCase())) return false;
                     if (diaryTagFilter !== 'all' && dy.tag !== diaryTagFilter) return false;
                     if (diaryOfferFilter !== 'all' && dy.offerId !== diaryOfferFilter) return false;
@@ -1953,14 +2112,9 @@ export default function App({ session, cloudState }) {
                   .map(dy => {
                     const linkedOffer = offers.find(o => o.id === dy.offerId);
                     
-                    const tagDict = {
-                      lancamento: '🚀 Lançamento',
-                      analise: '📊 Análise',
-                      insight: '💡 Insight',
-                      problema: '⚠️ Problema',
-                      decisao: '✅ Decisão',
-                      resultado: '🔥 Resultado'
-                    };
+                    const tagMeta = DIARY_TAG_MAP[dy.tag];
+                    const TagIcon = tagMeta?.Icon;
+                    const tagLabel = tagMeta?.label || dy.tag;
 
                     return (
                       <div key={dy.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1972,18 +2126,24 @@ export default function App({ session, cloudState }) {
                           </span>
                           
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span className="badge badge-gray" style={{ fontSize: '10px' }}>
-                              {tagDict[dy.tag] || dy.tag}
+                            {dy.isAuto && (
+                              <span className="badge badge-blue" style={{ fontSize: '9px' }} title="Entrada criada automaticamente">
+                                AUTO
+                              </span>
+                            )}
+                            <span className="badge badge-gray" style={{ fontSize: '10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              {TagIcon && <TagIcon size={10} />}
+                              {tagLabel}
                             </span>
-                            <button 
-                              className="btn" 
+                            <button
+                              className="btn"
                               onClick={() => setEditingDiary(dy)}
                               style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: 'var(--text3)' }}
                             >
                               <Edit size={12} />
                             </button>
-                            <button 
-                              className="btn" 
+                            <button
+                              className="btn"
                               onClick={() => handleDeleteDiary(dy.id)}
                               style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: 'var(--red)' }}
                             >
@@ -2000,7 +2160,7 @@ export default function App({ session, cloudState }) {
                         {/* Linked Offer Footer */}
                         {linkedOffer && (
                           <div style={{ alignSelf: 'flex-start', fontSize: '10px', color: 'var(--accent)', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <span>{linkedOffer.emoji}</span>
+                            <OfferIcon offer={linkedOffer} size={11} color="var(--accent)" />
                             <span>{linkedOffer.name}</span>
                           </div>
                         )}
@@ -2067,7 +2227,7 @@ export default function App({ session, cloudState }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
                 <div>
                   <h2 style={{ fontSize: '20px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <span>{activeOfferForDrawer.emoji}</span>
+                    <OfferIcon offer={activeOfferForDrawer} size={22} color="var(--accent)" />
                     <span>{activeOfferForDrawer.name}</span>
                   </h2>
                   <span className="badge badge-green">{activeOfferForDrawer.stage}</span>
@@ -2088,16 +2248,30 @@ export default function App({ session, cloudState }) {
                   <Edit size={12} /> Editar
                 </button>
                 
-                <button 
-                  className={`btn ${activeOfferForDrawer.status === 'pausada' ? 'btn-primary' : 'btn-secondary'}`} 
+                <button
+                  className={`btn ${activeOfferForDrawer.status === 'pausada' ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => {
-                    const nextStatus = activeOfferForDrawer.status === 'ativa' ? 'pausada' : 'ativa';
-                    handleUpdateOffer({
-                      ...activeOfferForDrawer,
-                      status: nextStatus,
-                      stage: nextStatus === 'pausada' ? 'pausada' : activeOfferForDrawer.stage
-                    });
-                  }} 
+                    const isPausingNow = activeOfferForDrawer.status === 'ativa';
+                    if (isPausingNow) {
+                      // remember where we were so we can come back to the same stage
+                      handleUpdateOffer({
+                        ...activeOfferForDrawer,
+                        status: 'pausada',
+                        previousStage: activeOfferForDrawer.stage !== 'pausada' && activeOfferForDrawer.stage !== 'morta'
+                          ? activeOfferForDrawer.stage
+                          : (activeOfferForDrawer.previousStage || 'testando'),
+                        stage: 'pausada'
+                      });
+                    } else {
+                      const restoreStage = activeOfferForDrawer.previousStage || 'testando';
+                      handleUpdateOffer({
+                        ...activeOfferForDrawer,
+                        status: 'ativa',
+                        stage: restoreStage,
+                        previousStage: null
+                      });
+                    }
+                  }}
                   style={{ fontSize: '11px', padding: '6px' }}
                 >
                   {activeOfferForDrawer.status === 'ativa' ? 'Pausar' : 'Ativar'}
@@ -2139,6 +2313,14 @@ export default function App({ session, cloudState }) {
                   <div style={{ backgroundColor: 'var(--bg3)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '9px', color: 'var(--text2)' }}>Margem</div>
                     <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{Pct(stats.margin)}</div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg3)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '9px', color: 'var(--text2)' }}>Vendas / Bumps</div>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{stats.sales} / {stats.bumps}</div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg3)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '9px', color: 'var(--text2)' }}>Ticket Médio</div>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{stats.arpu > 0 ? R(stats.arpu) : '—'}</div>
                   </div>
                 </div>
               </div>
@@ -2196,16 +2378,9 @@ export default function App({ session, cloudState }) {
               <div style={{ marginBottom: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '4px' }}>
                   <h3 style={{ fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', margin: '0' }}>Criativos</h3>
-                  <button 
-                    className="btn btn-secondary" 
-                    onClick={() => {
-                      const name = prompt('Nome do criativo:');
-                      const roas = prompt('ROAS estimado (ex: 2.5):');
-                      const notes = prompt('Observações do criativo:');
-                      if (name) {
-                        handleAddCreative(activeOfferForDrawer.id, name, roas, notes);
-                      }
-                    }}
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setCreativeModalState({ offerId: activeOfferForDrawer.id, creative: null })}
                     style={{ fontSize: '9px', padding: '2px 6px' }}
                   >
                     + Criativo
@@ -2235,17 +2410,25 @@ export default function App({ session, cloudState }) {
                             <span style={{ fontSize: '11px', fontWeight: 'bold', color: c.roas >= 1.5 ? 'var(--green)' : 'var(--text2)' }}>
                               ROAS: {Roas(c.roas)}
                             </span>
-                            
+
                             <label className="toggle-switch" style={{ margin: '0' }}>
-                              <input 
-                                type="checkbox" 
-                                checked={c.status === 'ativo'} 
+                              <input
+                                type="checkbox"
+                                checked={c.status === 'ativo'}
                                 onChange={() => handleToggleCreative(activeOfferForDrawer.id, c.id)}
                               />
                               <span className="slider"></span>
                             </label>
 
-                            <button 
+                            <button
+                              onClick={() => setCreativeModalState({ offerId: activeOfferForDrawer.id, creative: c })}
+                              title="Editar"
+                              style={{ border: 'none', background: 'transparent', color: 'var(--text3)', cursor: 'pointer' }}
+                            >
+                              <Edit size={10} />
+                            </button>
+
+                            <button
                               onClick={() => handleDeleteCreative(activeOfferForDrawer.id, c.id)}
                               style={{ border: 'none', background: 'transparent', color: 'var(--red)', cursor: 'pointer' }}
                             >
@@ -2319,7 +2502,7 @@ export default function App({ session, cloudState }) {
               </div>
 
               {/* Section: Historico logs diários */}
-              <div>
+              <div style={{ marginBottom: '24px' }}>
                 <h3 style={{ fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '4px' }}>Últimos 10 Dias Registrados</h3>
                 {records.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -2327,11 +2510,19 @@ export default function App({ session, cloudState }) {
                       const dayProfit = r.revenue - r.adSpend;
                       const dayRoas = r.adSpend > 0 ? r.revenue / r.adSpend : 0;
                       return (
-                        <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 8px', borderBottom: '1px solid var(--border)', fontSize: '11px' }}>
-                          <span>{new Date(r.date + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                        <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderBottom: '1px solid var(--border)', fontSize: '11px', gap: '8px' }}>
+                          <span style={{ minWidth: '70px' }}>{new Date(r.date + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
                           <span style={{ color: 'var(--text2)' }}>Fat: {R(r.revenue)}</span>
                           <span style={{ color: dayProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>Lucro: {R(dayProfit)}</span>
                           <span style={{ fontWeight: 'bold' }}>ROAS: {dayRoas > 0 ? Roas(dayRoas) : '—'}</span>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button onClick={() => setEditingDailyRecord(r)} title="Editar" style={{ border: 'none', background: 'transparent', color: 'var(--text3)', cursor: 'pointer', padding: 0 }}>
+                              <Edit size={11} />
+                            </button>
+                            <button onClick={() => handleDeleteDailyRecord(r.id)} title="Deletar" style={{ border: 'none', background: 'transparent', color: 'var(--red)', cursor: 'pointer', padding: 0 }}>
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
@@ -2343,6 +2534,63 @@ export default function App({ session, cloudState }) {
                 )}
               </div>
 
+              {/* Section: Tarefas vinculadas */}
+              {(() => {
+                const linkedTasks = tasks.filter(t => t.offerId === activeOfferForDrawer.id);
+                return (
+                  <div style={{ marginBottom: '24px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '4px' }}>
+                      <h3 style={{ fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', margin: 0 }}>Tarefas vinculadas ({linkedTasks.length})</h3>
+                      <button className="btn" onClick={() => { setSelectedOfferIdForDrawer(null); setKanbanOfferFilter(activeOfferForDrawer.id); setActivePage('kanban'); }} style={{ fontSize: '10px', padding: 0, border: 'none', background: 'transparent', color: 'var(--accent)' }}>
+                        Ver no Kanban <ArrowUpRight size={11} />
+                      </button>
+                    </div>
+                    {linkedTasks.length === 0 ? (
+                      <span style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', textAlign: 'center', padding: '8px' }}>Nenhuma tarefa para esta oferta.</span>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {linkedTasks.slice(0, 6).map(t => (
+                          <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderBottom: '1px solid var(--border)', fontSize: '11px', cursor: 'pointer' }} onClick={() => setEditingTask(t)}>
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: '8px' }}>{t.title}</span>
+                            <span className="badge badge-gray" style={{ fontSize: '9px' }}>{t.column}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Section: Diário vinculado */}
+              {(() => {
+                const linkedDiary = diary.filter(d => d.offerId === activeOfferForDrawer.id);
+                return (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '4px' }}>
+                      <h3 style={{ fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', margin: 0 }}>Diário vinculado ({linkedDiary.length})</h3>
+                      <button className="btn" onClick={() => { setSelectedOfferIdForDrawer(null); setDiaryOfferFilter(activeOfferForDrawer.id); setActivePage('diary'); }} style={{ fontSize: '10px', padding: 0, border: 'none', background: 'transparent', color: 'var(--accent)' }}>
+                        Ver no Diário <ArrowUpRight size={11} />
+                      </button>
+                    </div>
+                    {linkedDiary.length === 0 ? (
+                      <span style={{ fontSize: '11px', color: 'var(--text3)', display: 'block', textAlign: 'center', padding: '8px' }}>Nenhuma entrada de diário para esta oferta.</span>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {linkedDiary.slice(0, 4).map(d => (
+                          <div key={d.id} style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', fontSize: '11px', cursor: 'pointer' }} onClick={() => setEditingDiary(d)}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text3)', fontSize: '10px', marginBottom: '2px' }}>
+                              <span>{new Date(d.createdAt).toLocaleDateString('pt-BR')}</span>
+                              <span>{d.isAuto ? 'AUTO' : (d.tag || '').toUpperCase()}</span>
+                            </div>
+                            <span style={{ color: 'var(--text)' }}>{d.text.substring(0, 90)}{d.text.length > 90 ? '…' : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
             </div>
           </>
         );
@@ -2352,31 +2600,42 @@ export default function App({ session, cloudState }) {
           MODALS & DIALOGS
           ======================================================== */}
       {isNewOfferModalOpen && (
-        <OfferModal 
-          prefilledStage={isNewOfferModalOpen.stage}
-          onClose={() => setIsNewOfferModalOpen(false)} 
+        <OfferModal
+          prefill={offerModalPrefill}
+          prefilledStage={typeof isNewOfferModalOpen === 'object' ? isNewOfferModalOpen.stage : undefined}
+          onClose={() => { setIsNewOfferModalOpen(false); setOfferModalPrefill(null); }}
           onSubmit={handleCreateOffer}
         />
       )}
 
       {editingOffer && (
-        <OfferModal 
+        <OfferModal
           offer={editingOffer}
-          onClose={() => setEditingOffer(null)} 
+          onClose={() => setEditingOffer(null)}
           onSubmit={handleUpdateOffer}
         />
       )}
 
       {isDailyDataDrawerOpen && (
-        <DailyDataModal 
+        <DailyDataModal
           offers={offers}
+          initialOfferId={selectedOfferIdForDrawer}
           onClose={() => setIsDailyDataDrawerOpen(false)}
           onSubmit={handleLogDailyData}
         />
       )}
 
+      {editingDailyRecord && (
+        <DailyDataModal
+          offers={offers}
+          record={editingDailyRecord}
+          onClose={() => setEditingDailyRecord(null)}
+          onSubmit={handleUpdateDailyRecord}
+        />
+      )}
+
       {isNewTaskModalOpen && (
-        <TaskModal 
+        <TaskModal
           offers={offers}
           onClose={() => setIsNewTaskModalOpen(false)}
           onSubmit={handleCreateTask}
@@ -2384,7 +2643,7 @@ export default function App({ session, cloudState }) {
       )}
 
       {editingTask && (
-        <TaskModal 
+        <TaskModal
           offers={offers}
           task={editingTask}
           onClose={() => setEditingTask(null)}
@@ -2394,14 +2653,14 @@ export default function App({ session, cloudState }) {
       )}
 
       {isNewIdeaModalOpen && (
-        <IdeaModal 
+        <IdeaModal
           onClose={() => setIsNewIdeaModalOpen(false)}
           onSubmit={handleCreateIdea}
         />
       )}
 
       {editingIdea && (
-        <IdeaModal 
+        <IdeaModal
           idea={editingIdea}
           onClose={() => setEditingIdea(null)}
           onSubmit={handleUpdateIdea}
@@ -2409,7 +2668,7 @@ export default function App({ session, cloudState }) {
       )}
 
       {isNewDiaryModalOpen && (
-        <DiaryModal 
+        <DiaryModal
           offers={offers}
           onClose={() => setIsNewDiaryModalOpen(false)}
           onSubmit={handleCreateDiary}
@@ -2417,12 +2676,28 @@ export default function App({ session, cloudState }) {
       )}
 
       {editingDiary && (
-        <DiaryModal 
+        <DiaryModal
           offers={offers}
           diary={editingDiary}
           onClose={() => setEditingDiary(null)}
           onSubmit={handleUpdateDiary}
           onDelete={handleDeleteDiary}
+        />
+      )}
+
+      {creativeModalState && (
+        <CreativeModal
+          creative={creativeModalState.creative}
+          onClose={() => setCreativeModalState(null)}
+          onSubmit={(payload) => handleSaveCreative(creativeModalState.offerId, payload)}
+        />
+      )}
+
+      {isGoalModalOpen && (
+        <GoalModal
+          initialValue={globalDailyGoal}
+          onClose={() => setIsGoalModalOpen(false)}
+          onSubmit={(v) => { setGlobalDailyGoal(Number(v) || 0); setIsGoalModalOpen(false); }}
         />
       )}
 
@@ -2433,27 +2708,28 @@ export default function App({ session, cloudState }) {
 // ==========================================
 // SUBCOMPONENTS: MODALS & FORMS
 // ==========================================
-const EMOJI_OPTIONS = ['🍇', '🍔', '☕', '⛏️', '🍕', '🍰', '🍣', '👟', '👕', '🎮', '💻', '📱', '📚', '🎯', '🏋️', '🎨', '✈️', '💰', '💡', '🔥'];
-
-function OfferModal({ offer, prefilledStage, onClose, onSubmit }) {
+function OfferModal({ offer, prefill, prefilledStage, onClose, onSubmit }) {
   const isEdit = !!offer;
-  
+
   const [formData, setFormData] = useState({
     id: offer?.id || '',
-    name: offer?.name || '',
-    emoji: offer?.emoji || '🍇',
-    type: offer?.type || 'pack_artes',
-    niche: offer?.niche || '',
-    stage: offer?.stage || prefilledStage || 'ideia',
+    name: offer?.name || prefill?.name || '',
+    icon: offer?.icon || (offer?.emoji ? EMOJI_TO_ICON_KEY[offer.emoji] : null) || (prefill?.icon) || 'grape',
+    emoji: offer?.emoji || null,
+    type: offer?.type || prefill?.type || 'pack_artes',
+    niche: offer?.niche || prefill?.niche || '',
+    stage: offer?.stage || prefill?.stage || prefilledStage || 'ideia',
     pageUrl: offer?.pageUrl || '',
     checkoutBasicUrl: offer?.checkoutBasicUrl || '',
     checkoutCompleteUrl: offer?.checkoutCompleteUrl || '',
-    dailyProfitGoal: offer?.dailyProfitGoal || 100,
+    dailyProfitGoal: offer?.dailyProfitGoal || prefill?.dailyProfitGoal || 100,
     launchDate: offer?.launchDate || '',
-    notes: offer?.notes || '',
+    notes: offer?.notes || prefill?.notes || '',
     status: offer?.status || 'ativa',
+    previousStage: offer?.previousStage || null,
     checklist: offer?.checklist || {},
-    creatives: offer?.creatives || []
+    creatives: offer?.creatives || [],
+    fromIdeaId: prefill?.fromIdeaId
   });
 
   const handleSubmit = (e) => {
@@ -2463,8 +2739,8 @@ function OfferModal({ offer, prefilledStage, onClose, onSubmit }) {
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '18px' }}>{isEdit ? 'Editar Oferta' : 'Nova Oferta'}</h2>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>
@@ -2486,26 +2762,34 @@ function OfferModal({ offer, prefilledStage, onClose, onSubmit }) {
           </div>
 
           <div className="form-group">
-            <label>Emoji da Oferta</label>
+            <label>Ícone da Oferta</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', backgroundColor: 'var(--bg3)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-              {EMOJI_OPTIONS.map(emoji => (
-                <button
-                  key={emoji}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, emoji })}
-                  style={{
-                    width: '32px',
-                    height: '32px',
-                    fontSize: '18px',
-                    borderRadius: '4px',
-                    border: formData.emoji === emoji ? '1px solid var(--accent)' : '1px solid transparent',
-                    backgroundColor: formData.emoji === emoji ? 'var(--bg2)' : 'transparent',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {emoji}
-                </button>
-              ))}
+              {ICON_OPTIONS.map(({ key, label, Icon }) => {
+                const selected = formData.icon === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    title={label}
+                    onClick={() => setFormData({ ...formData, icon: key })}
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '6px',
+                      border: selected ? '1px solid var(--accent)' : '1px solid transparent',
+                      backgroundColor: selected ? 'var(--bg2)' : 'transparent',
+                      color: selected ? 'var(--accent)' : 'var(--text2)',
+                      cursor: 'pointer',
+                      transition: 'all 120ms ease'
+                    }}
+                  >
+                    <Icon size={18} />
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -2626,15 +2910,17 @@ function OfferModal({ offer, prefilledStage, onClose, onSubmit }) {
   );
 }
 
-function DailyDataModal({ offers, onClose, onSubmit }) {
+function DailyDataModal({ offers, record, initialOfferId, onClose, onSubmit }) {
+  const isEdit = !!record;
   const [formData, setFormData] = useState({
-    offerId: offers[0]?.id || '',
-    date: new Date().toISOString().split('T')[0],
-    revenue: '',
-    adSpend: '',
-    sales: '',
-    bumps: '',
-    notes: ''
+    id: record?.id || '',
+    offerId: record?.offerId || initialOfferId || offers[0]?.id || '',
+    date: record?.date || new Date().toISOString().split('T')[0],
+    revenue: record?.revenue?.toString() ?? '',
+    adSpend: record?.adSpend?.toString() ?? '',
+    sales: record?.sales?.toString() ?? '',
+    bumps: record?.bumps?.toString() ?? '',
+    notes: record?.notes || ''
   });
 
   const handleSubmit = (e) => {
@@ -2651,10 +2937,10 @@ function DailyDataModal({ offers, onClose, onSubmit }) {
   const previewCpa = previewSales > 0 ? (previewAdSpend / previewSales).toFixed(2) : '0.00';
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ fontSize: '18px' }}>Registrar Dados Diários</h2>
+          <h2 style={{ fontSize: '18px' }}>{isEdit ? 'Editar Registro Diário' : 'Registrar Dados Diários'}</h2>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>
             <X size={18} />
           </button>
@@ -2671,7 +2957,7 @@ function DailyDataModal({ offers, onClose, onSubmit }) {
             >
               <option value="">Selecione uma oferta...</option>
               {offers.map(o => (
-                <option key={o.id} value={o.id}>{o.emoji} {o.name} ({o.status})</option>
+                <option key={o.id} value={o.id}>{o.name} ({o.status})</option>
               ))}
             </select>
           </div>
@@ -2766,7 +3052,7 @@ function DailyDataModal({ offers, onClose, onSubmit }) {
               Cancelar
             </button>
             <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
-              Registrar Dia
+              {isEdit ? 'Salvar Alterações' : 'Registrar Dia'}
             </button>
           </div>
 
@@ -2796,8 +3082,8 @@ function TaskModal({ offers, task, onClose, onSubmit, onDelete }) {
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '18px' }}>{isEdit ? 'Editar Tarefa' : 'Nova Tarefa'}</h2>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>
@@ -2824,12 +3110,9 @@ function TaskModal({ offers, task, onClose, onSubmit, onDelete }) {
               value={formData.type} 
               onChange={e => setFormData({ ...formData, type: e.target.value })}
             >
-              <option value="criativo">🎨 Criativo</option>
-              <option value="pagina">📄 Página</option>
-              <option value="setup">⚙️ Setup</option>
-              <option value="analise">📊 Análise</option>
-              <option value="lancamento">🚀 Lançamento</option>
-              <option value="fix">🔧 Fix</option>
+              {TASK_TYPES.map(t => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
             </select>
           </div>
 
@@ -2841,7 +3124,7 @@ function TaskModal({ offers, task, onClose, onSubmit, onDelete }) {
             >
               <option value="">Nenhuma (Geral)</option>
               {offers.map(o => (
-                <option key={o.id} value={o.id}>{o.emoji} {o.name}</option>
+                <option key={o.id} value={o.id}>{o.name}</option>
               ))}
             </select>
           </div>
@@ -2930,8 +3213,8 @@ function IdeaModal({ idea, onClose, onSubmit }) {
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '18px' }}>{isEdit ? 'Editar Ideia' : 'Nova Ideia'}</h2>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>
@@ -2984,11 +3267,11 @@ function IdeaModal({ idea, onClose, onSubmit }) {
                 value={formData.potential} 
                 onChange={e => setFormData({ ...formData, potential: Number(e.target.value) })}
               >
-                <option value="1">⭐ 1/5</option>
-                <option value="2">⭐⭐ 2/5</option>
-                <option value="3">⭐⭐⭐ 3/5</option>
-                <option value="4">⭐⭐⭐⭐ 4/5</option>
-                <option value="5">⭐⭐⭐⭐⭐ 5/5</option>
+                <option value="1">1/5 — Muito Baixo</option>
+                <option value="2">2/5 — Baixo</option>
+                <option value="3">3/5 — Médio</option>
+                <option value="4">4/5 — Alto</option>
+                <option value="5">5/5 — Muito Alto</option>
               </select>
             </div>
 
@@ -2998,11 +3281,11 @@ function IdeaModal({ idea, onClose, onSubmit }) {
                 value={formData.effort} 
                 onChange={e => setFormData({ ...formData, effort: Number(e.target.value) })}
               >
-                <option value="1">⚡ 1/5 (Muito Baixo)</option>
-                <option value="2">⚡⚡ 2/5 (Baixo)</option>
-                <option value="3">⚡⚡⚡ 3/5 (Médio)</option>
-                <option value="4">⚡⚡⚡⚡ 4/5 (Alto)</option>
-                <option value="5">⚡⚡⚡⚡⚡ 5/5 (Muito Alto)</option>
+                <option value="1">1/5 — Muito Baixo</option>
+                <option value="2">2/5 — Baixo</option>
+                <option value="3">3/5 — Médio</option>
+                <option value="4">4/5 — Alto</option>
+                <option value="5">5/5 — Muito Alto</option>
               </select>
             </div>
           </div>
@@ -3060,8 +3343,8 @@ function DiaryModal({ offers, diary, onClose, onSubmit, onDelete }) {
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '18px' }}>{isEdit ? 'Editar Entrada Diário' : 'Nova Entrada Diário'}</h2>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>
@@ -3077,12 +3360,9 @@ function DiaryModal({ offers, diary, onClose, onSubmit, onDelete }) {
               value={formData.tag} 
               onChange={e => setFormData({ ...formData, tag: e.target.value })}
             >
-              <option value="lancamento">🚀 Lançamento</option>
-              <option value="analise">📊 Análise</option>
-              <option value="insight">💡 Insight</option>
-              <option value="problema">⚠️ Problema</option>
-              <option value="decisao">✅ Decisão</option>
-              <option value="resultado">🔥 Resultado</option>
+              {DIARY_TAGS.map(t => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
             </select>
           </div>
 
@@ -3094,7 +3374,7 @@ function DiaryModal({ offers, diary, onClose, onSubmit, onDelete }) {
             >
               <option value="">Nenhuma (Operação Geral)</option>
               {offers.map(o => (
-                <option key={o.id} value={o.id}>{o.emoji} {o.name}</option>
+                <option key={o.id} value={o.id}>{o.name}</option>
               ))}
             </select>
           </div>
@@ -3136,27 +3416,166 @@ function DiaryModal({ offers, diary, onClose, onSubmit, onDelete }) {
 }
 
 // ==========================================
+// CREATIVE MODAL (replaces window.prompt chain)
+// ==========================================
+function CreativeModal({ creative, onClose, onSubmit }) {
+  const isEdit = !!creative;
+  const [formData, setFormData] = useState({
+    id: creative?.id || '',
+    name: creative?.name || '',
+    roas: creative?.roas?.toString() ?? '',
+    notes: creative?.notes || ''
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.name.trim()) return;
+    onSubmit(formData);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ fontSize: '18px' }}>{isEdit ? 'Editar Criativo' : 'Novo Criativo'}</h2>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="form-group">
+            <label>Nome do Criativo</label>
+            <input
+              type="text"
+              required
+              autoFocus
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Ex: video_01_copo_recheado"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>ROAS Estimado</label>
+            <input
+              type="number"
+              step="0.01"
+              value={formData.roas}
+              onChange={e => setFormData({ ...formData, roas: e.target.value })}
+              placeholder="Ex: 2.5"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Observações</label>
+            <textarea
+              value={formData.notes}
+              onChange={e => setFormData({ ...formData, notes: e.target.value })}
+              placeholder="Hook, ângulo, copy..."
+              style={{ minHeight: '60px' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
+            <button type="button" className="btn btn-secondary" onClick={onClose} style={{ flex: 1 }}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+              Salvar Criativo
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// GOAL MODAL (editable global daily goal)
+// ==========================================
+function GoalModal({ initialValue, onClose, onSubmit }) {
+  const [value, setValue] = useState(initialValue?.toString() ?? '1000');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(value);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '380px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2 style={{ fontSize: '18px' }}>Meta Diária Global</h2>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>
+            <X size={18} />
+          </button>
+        </div>
+        <p style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '16px', lineHeight: '1.4' }}>
+          Lucro diário desejado para toda a operação. Usado no medidor de progresso do cabeçalho.
+        </p>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="form-group">
+            <label>Meta de Lucro / Dia (R$)</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              required
+              autoFocus
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+            <button type="button" className="btn btn-secondary" onClick={onClose} style={{ flex: 1 }}>
+              Cancelar
+            </button>
+            <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
+              Salvar Meta
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
 // PAID TRAFFIC IDEAL CPA/ROAS CALCULATOR (UX Boost Helper)
 // ==========================================
 function TrafficCalculator() {
-  const [price, setPrice] = useState(97);
-  const [gatewayPercent, setGatewayPercent] = useState(8);
-  const [gatewayFixed, setGatewayFixed] = useState(1.0);
-  const [targetMargin, setTargetMargin] = useState(30);
-  const [cogs, setCogs] = useState(0);
+  const loadSaved = () => {
+    try {
+      const raw = localStorage.getItem('ops_traffic_calc');
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return null;
+  };
+  const saved = loadSaved();
+
+  const [price, setPrice] = useState(saved?.price ?? 97);
+  const [gatewayPercent, setGatewayPercent] = useState(saved?.gatewayPercent ?? 8);
+  const [gatewayFixed, setGatewayFixed] = useState(saved?.gatewayFixed ?? 1.0);
+  const [targetMargin, setTargetMargin] = useState(saved?.targetMargin ?? 30);
+  const [cogs, setCogs] = useState(saved?.cogs ?? 0);
+
+  useEffect(() => {
+    localStorage.setItem('ops_traffic_calc', JSON.stringify({ price, gatewayPercent, gatewayFixed, targetMargin, cogs }));
+  }, [price, gatewayPercent, gatewayFixed, targetMargin, cogs]);
 
   // Computations
   const gatewayFee = (price * (gatewayPercent / 100)) + gatewayFixed;
   const netRevenue = price - gatewayFee - cogs;
-  
-  // Break-even (ROAS 1.0 margin)
-  const breakevenCpa = netRevenue;
-  const breakevenRoas = price / breakevenCpa;
 
-  // Target metrics (at target profit margin)
+  const breakevenCpa = Math.max(0, netRevenue);
+  const breakevenRoas = breakevenCpa > 0 ? price / breakevenCpa : 0;
+
   const targetProfitAmount = price * (targetMargin / 100);
-  const targetCpa = netRevenue - targetProfitAmount;
-  const targetRoas = price / (targetCpa > 0 ? targetCpa : 0.01);
+  const targetCpaRaw = netRevenue - targetProfitAmount;
+  const targetCpa = Math.max(0, targetCpaRaw);
+  const targetRoas = targetCpa > 0 ? price / targetCpa : 0;
+  const targetUnreachable = targetCpaRaw <= 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -3237,21 +3656,33 @@ function TrafficCalculator() {
         {/* Target details */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '12px' }}>
           <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text3)' }}>META PARA LUCRO DE {targetMargin}%</span>
-          
+
           <div>
             <div style={{ fontSize: '10px', color: 'var(--text2)' }}>CPA Alvo (Anúncios):</div>
-            <div style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--green)' }}>{R(targetCpa)}</div>
+            <div style={{ fontSize: '16px', fontWeight: 'bold', color: targetUnreachable ? 'var(--red)' : 'var(--green)' }}>
+              {targetUnreachable ? 'Inviável' : R(targetCpa)}
+            </div>
           </div>
           <div>
             <div style={{ fontSize: '10px', color: 'var(--text2)' }}>ROAS Alvo (Meta):</div>
-            <div style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--accent)' }}>{Roas(targetRoas)}x</div>
+            <div style={{ fontSize: '16px', fontWeight: 'bold', color: targetUnreachable ? 'var(--red)' : 'var(--accent)' }}>
+              {targetUnreachable ? '—' : `${Roas(targetRoas)}x`}
+            </div>
           </div>
         </div>
 
       </div>
 
-      <div style={{ fontSize: '11px', color: 'var(--text3)', borderLeft: '3px solid var(--accent)', paddingLeft: '10px', lineHeight: '1.4' }}>
-        <strong>Recomendação:</strong> Configure seu conjunto de anúncios no Meta Ads para otimizar com base em um CPA menor que <strong>{R(targetCpa)}</strong>. Caso seu CPA ultrapasse <strong>{R(breakevenCpa)}</strong>, você estará perdendo dinheiro.
+      <div style={{ fontSize: '11px', color: 'var(--text3)', borderLeft: `3px solid ${targetUnreachable ? 'var(--red)' : 'var(--accent)'}`, paddingLeft: '10px', lineHeight: '1.4' }}>
+        {targetUnreachable ? (
+          <>
+            <strong>Atenção:</strong> a margem alvo de {targetMargin}% é maior que a margem máxima possível ({Pct((netRevenue / price) * 100)}). Reduza a margem alvo, suba o preço ou reduza o COGS / taxa.
+          </>
+        ) : (
+          <>
+            <strong>Recomendação:</strong> Configure seu conjunto de anúncios para otimizar com CPA menor que <strong>{R(targetCpa)}</strong>. Caso seu CPA ultrapasse <strong>{R(breakevenCpa)}</strong>, você estará perdendo dinheiro.
+          </>
+        )}
       </div>
 
     </div>
@@ -3312,7 +3743,7 @@ function UtmBuilder({ offers }) {
         <select onChange={e => handleOfferSelect(e.target.value)} style={{ padding: '8px' }}>
           <option value="">Selecione para importar...</option>
           {offers.map(o => (
-            <option key={o.id} value={o.id}>{o.emoji} {o.name}</option>
+            <option key={o.id} value={o.id}>{o.name}</option>
           ))}
         </select>
       </div>

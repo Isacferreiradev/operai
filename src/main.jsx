@@ -21,8 +21,11 @@ function Root() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
+      if (event === 'SIGNED_OUT') {
+        ['ops_theme', 'ops_offers', 'ops_daily_data', 'ops_tasks', 'ops_ideas', 'ops_diary', 'ops_global_goal', 'ops_traffic_calc', 'ops_dismissed_alerts'].forEach(k => localStorage.removeItem(k))
+      }
     })
 
     return () => subscription.unsubscribe()
@@ -103,15 +106,7 @@ function Root() {
   }
 
   if (loading || (session && !cloudLoaded)) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: 'sans-serif', backgroundColor: '#f8fafc', color: '#0f172a' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-          <div style={{ width: '40px', height: '40px', border: '3px solid #e2e8f0', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-          <span style={{ fontWeight: 500 }}>Sincronizando com a nuvem...</span>
-          <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (
