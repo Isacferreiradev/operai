@@ -1,18 +1,8 @@
-<svg viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="favGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#3b1d8a"/>
-      <stop offset="100%" stop-color="#a78bfa"/>
-    </linearGradient>
-  </defs>
-  <rect width="160" height="160" rx="28" fill="#ffffff"/>
-  <g transform="translate(18,30)">
-    <line x1="22" y1="92" x2="50" y2="64" stroke="url(#favGrad)" stroke-width="9" stroke-linecap="round"/>
-    <line x1="78" y1="56" x2="106" y2="28" stroke="url(#favGrad)" stroke-width="9" stroke-linecap="round"/>
-    <rect x="6" y="78" width="32" height="32" rx="3" fill="none" stroke="url(#favGrad)" stroke-width="9"/>
-    <rect x="50" y="42" width="32" height="32" rx="3" fill="none" stroke="url(#favGrad)" stroke-width="9"/>
-    <rect x="94" y="6" width="32" height="32" rx="3" fill="none" stroke="url(#favGrad)" stroke-width="9"/>
-    <path d="M 122 14 L 148 -12" stroke="url(#favGrad)" stroke-width="9" stroke-linecap="round" fill="none"/>
-    <path d="M 134 -12 L 148 -12 L 148 2" stroke="url(#favGrad)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect width="200" height="200" rx="36" fill="#ffffff"/>
+  <g transform="translate(36, 36)" fill="#000">
+    <path d="M 0 64 A 64 64 0 0 1 128 64 Z"/>
+    <path d="M 64 64 A 44 44 0 0 1 108 108 L 64 108 Z"/>
+    <rect x="58" y="64" width="22" height="74"/>
   </g>
 </svg>

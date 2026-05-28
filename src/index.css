@@ -60,6 +60,18 @@
   --shadow-lg: none;
 }
 
+/* Operai logo — pretto no light, invertido no dark theme */
+.operai-logo {
+  width: 100%;
+  max-width: 150px;
+  height: auto;
+  display: block;
+  transition: filter 150ms ease;
+}
+.dark-theme .operai-logo {
+  filter: invert(1);
+}
+
 /* Reset and base styles */
 * {
   box-sizing: border-box;
@@ -123,8 +135,17 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
   justify-content: space-between;
   padding: 16px 12px;
-  z-index: 10;
-  transition: background-color 150ms ease, border-color 150ms ease;
+  z-index: 30;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), background-color 150ms ease, border-color 150ms ease;
+}
+
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 25;
+  backdrop-filter: blur(2px);
 }
 
 .main-content {
@@ -135,6 +156,30 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
   position: relative;
   overflow: hidden;
+}
+
+/* Mobile: sidebar slides in/out as drawer */
+@media (max-width: 860px) {
+  .sidebar {
+    transform: translateX(-100%);
+    box-shadow: 4px 0 20px rgba(0,0,0,0.2);
+  }
+  .sidebar.is-open {
+    transform: translateX(0);
+  }
+  .sidebar-backdrop.is-open {
+    display: block;
+  }
+  .main-content {
+    margin-left: 0;
+    width: 100vw;
+  }
+  .mobile-menu-btn {
+    display: inline-flex !important;
+  }
+  .header {
+    padding: 0 16px !important;
+  }
 }
 
 .header {

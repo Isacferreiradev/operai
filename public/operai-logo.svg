@@ -1,32 +1,19 @@
-<svg viewBox="0 0 520 140" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
-  <defs>
-    <linearGradient id="opGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#3b1d8a"/>
-      <stop offset="55%" stop-color="#6d4af5"/>
-      <stop offset="100%" stop-color="#a78bfa"/>
-    </linearGradient>
-  </defs>
-
-  <!-- Chart-with-arrow icon -->
-  <g transform="translate(16,18)">
-    <!-- connecting lines -->
-    <line x1="22" y1="92" x2="50" y2="64" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round"/>
-    <line x1="78" y1="56" x2="106" y2="28" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round"/>
-
-    <!-- node squares (rounded, outlined) -->
-    <rect x="6" y="78" width="32" height="32" rx="3" fill="none" stroke="url(#opGrad)" stroke-width="6"/>
-    <rect x="50" y="42" width="32" height="32" rx="3" fill="none" stroke="url(#opGrad)" stroke-width="6"/>
-    <rect x="94" y="6" width="32" height="32" rx="3" fill="none" stroke="url(#opGrad)" stroke-width="6"/>
-
-    <!-- arrow head extending up-right from top node -->
-    <path d="M 122 14 L 150 -10" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round" fill="none"/>
-    <path d="M 138 -10 L 150 -10 L 150 2" stroke="url(#opGrad)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 180" preserveAspectRatio="xMidYMid meet">
+  <!-- Icon mark: stylized geometric "G" — top half-disc + lower quarter + vertical bar -->
+  <g transform="translate(14, 18)" fill="#000">
+    <!-- Top large semicircle (flat edge at bottom) -->
+    <path d="M 0 70 A 65 65 0 0 1 130 70 Z"/>
+    <!-- Lower-right quarter-disc -->
+    <path d="M 65 70 A 45 45 0 0 1 110 115 L 65 115 Z"/>
+    <!-- Vertical bar -->
+    <rect x="58" y="70" width="22" height="78"/>
   </g>
 
   <!-- Wordmark -->
-  <g font-family="'Space Grotesk', 'DM Sans', system-ui, sans-serif" font-weight="700" font-size="92" letter-spacing="-3">
-    <text x="180" y="108" fill="#2e1065">Oper</text>
-    <text x="380" y="108" fill="#a78bfa">ai</text>
-    <rect x="380" y="118" width="76" height="6" rx="1" fill="#a78bfa"/>
-  </g>
+  <text x="178" y="125"
+        font-family="'Space Grotesk', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
+        font-weight="400"
+        font-size="100"
+        letter-spacing="-3"
+        fill="#000">Operai</text>
 </svg>

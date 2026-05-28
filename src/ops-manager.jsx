@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createElement } from 'react';
+import React, { useState, useEffect, createElement, useRef, useMemo, useCallback } from 'react';
 import {
   LayoutGrid,
   KanbanSquare,
@@ -40,7 +40,10 @@ import {
   Gamepad2, Laptop, Smartphone, GraduationCap, Dumbbell, Palette, Plane, Coins,
   // Tag / task / sort icons
   Rocket, BarChart3, CheckCircle2, Star,
-  Package
+  Package,
+  // New utilities (Cmd+K, mobile, toasts, etc.)
+  Menu, ArrowDown, ArrowUp, Pin, GripVertical, Info,
+  Download as DownloadIcon, ChevronRight, ChevronLeft
 } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from './supabase';
 
@@ -144,6 +147,7 @@ const TASK_TYPES = [
   { key: 'fix',        label: 'Fix' },
 ];
 
+
 // User avatar: tries /profile.jpg, falls back to gradient + initials on error
 function UserAvatar({ email }) {
   const [errored, setErrored] = useState(false);
@@ -179,6 +183,173 @@ function UserAvatar({ email }) {
       onError={() => setErrored(true)}
       style={sharedStyle}
     />
+  );
+}
+
+// ==========================================
+// TOAST SYSTEM — global queue with hook
+// ==========================================
+const toastListeners = new Set();
+let _toastId = 0;
+
+export const toast = {
+  show(message, opts = {}) {
+    const id = ++_toastId;
+    const item = {
+      id,
+      message,
+      type: opts.type || 'info', // 'info' | 'success' | 'warning' | 'error'
+      duration: opts.duration ?? 3500,
+      action: opts.action || null // { label, onClick }
+    };
+    toastListeners.forEach(fn => fn({ type: 'add', item }));
+    return id;
+  },
+  dismiss(id) {
+    toastListeners.forEach(fn => fn({ type: 'remove', id }));
+  },
+  success(msg, opts) { return this.show(msg, { ...opts, type: 'success' }); },
+  info(msg, opts) { return this.show(msg, { ...opts, type: 'info' }); },
+  warn(msg, opts) { return this.show(msg, { ...opts, type: 'warning' }); },
+  error(msg, opts) { return this.show(msg, { ...opts, type: 'error', duration: opts?.duration ?? 5500 }); }
+};
+
+// Promise-based confirm replacement
+let _confirmResolver = null;
+export const askConfirm = (opts) => new Promise(resolve => {
+  _confirmResolver = resolve;
+  toastListeners.forEach(fn => fn({ type: 'confirm', opts }));
+});
+
+function ToastHost() {
+  const [items, setItems] = useState([]);
+  const [confirmState, setConfirmState] = useState(null);
+
+  useEffect(() => {
+    const handler = (ev) => {
+      if (ev.type === 'add') {
+        setItems(prev => [...prev, ev.item]);
+        if (ev.item.duration > 0) {
+          setTimeout(() => {
+            setItems(prev => prev.filter(t => t.id !== ev.item.id));
+          }, ev.item.duration);
+        }
+      } else if (ev.type === 'remove') {
+        setItems(prev => prev.filter(t => t.id !== ev.id));
+      } else if (ev.type === 'confirm') {
+        setConfirmState(ev.opts);
+      }
+    };
+    toastListeners.add(handler);
+    return () => toastListeners.delete(handler);
+  }, []);
+
+  const colorFor = (t) => ({
+    success: { bg: 'var(--green-dim)', border: 'var(--green)', text: 'var(--green)' },
+    info:    { bg: 'var(--blue-dim)',  border: 'var(--blue)',  text: 'var(--blue)' },
+    warning: { bg: 'var(--yellow-dim)', border: 'var(--yellow)', text: 'var(--yellow)' },
+    error:   { bg: 'var(--red-dim)',   border: 'var(--red)',   text: 'var(--red)' }
+  })[t] || { bg: 'var(--bg3)', border: 'var(--border2)', text: 'var(--text)' };
+
+  const IconFor = (type) => {
+    if (type === 'success') return CheckCircle2;
+    if (type === 'warning') return AlertTriangle;
+    if (type === 'error') return AlertTriangle;
+    return Info;
+  };
+
+  const closeConfirm = (result) => {
+    const r = _confirmResolver;
+    _confirmResolver = null;
+    setConfirmState(null);
+    if (r) r(result);
+  };
+
+  return (
+    <>
+      <div style={{
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        zIndex: 200,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        pointerEvents: 'none'
+      }}>
+        {items.map(t => {
+          const c = colorFor(t.type);
+          const Ico = IconFor(t.type);
+          return (
+            <div key={t.id} style={{
+              pointerEvents: 'auto',
+              backgroundColor: c.bg,
+              border: `1px solid ${c.border}`,
+              color: c.text,
+              padding: '10px 14px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 500,
+              maxWidth: '420px',
+              minWidth: '260px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.10)',
+              animation: 'toastSlideIn 220ms cubic-bezier(0.16, 1, 0.3, 1)'
+            }}>
+              <Ico size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
+              <div style={{ flex: 1, lineHeight: 1.4, color: 'var(--text)' }}>{t.message}</div>
+              {t.action && (
+                <button
+                  onClick={() => { t.action.onClick?.(); toast.dismiss(t.id); }}
+                  style={{ background: 'transparent', border: 'none', color: c.text, fontWeight: 600, cursor: 'pointer', fontSize: '12px', padding: '0 4px' }}
+                >
+                  {t.action.label}
+                </button>
+              )}
+              <button
+                onClick={() => toast.dismiss(t.id)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text3)', cursor: 'pointer', padding: 0, lineHeight: 0 }}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        })}
+        <style>{`@keyframes toastSlideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
+      </div>
+
+      {confirmState && (
+        <div className="modal-overlay" style={{ zIndex: 250 }} onClick={() => closeConfirm(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '440px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '12px' }}>
+              <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: confirmState.danger ? 'var(--red-dim)' : 'var(--yellow-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AlertTriangle size={18} color={confirmState.danger ? 'var(--red)' : 'var(--yellow)'} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ fontSize: '15px', marginBottom: '6px' }}>{confirmState.title || 'Confirmar ação'}</h3>
+                {confirmState.body && (
+                  <p style={{ fontSize: '13px', color: 'var(--text2)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{confirmState.body}</p>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => closeConfirm(false)} style={{ minWidth: '100px' }}>
+                {confirmState.cancelLabel || 'Cancelar'}
+              </button>
+              <button
+                className={confirmState.danger ? 'btn btn-danger' : 'btn btn-primary'}
+                onClick={() => closeConfirm(true)}
+                style={{ minWidth: '100px' }}
+              >
+                {confirmState.confirmLabel || 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -237,6 +408,29 @@ export default function App({ session, cloudState }) {
   // Session-only alert dismissals (key: alert content hash)
   const [dismissedAlerts, setDismissedAlerts] = useState(new Set());
 
+  // Global period filter — affects Dashboard + Pipeline + Metrics
+  const [periodFilter, setPeriodFilter] = useState(() => {
+    return localStorage.getItem('ops_period') || 'all'; // 'today' | '7d' | '30d' | 'all'
+  });
+  useEffect(() => {
+    localStorage.setItem('ops_period', periodFilter);
+  }, [periodFilter]);
+
+  // Cmd+K / Ctrl+K opens command palette
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setIsCommandPaletteOpen(true);
+      } else if (e.key === 'Escape') {
+        setIsCommandPaletteOpen(false);
+        setIsSidebarOpenMobile(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // UI Modals / Drawers States
   const [isNewOfferModalOpen, setIsNewOfferModalOpen] = useState(false);
   const [offerModalPrefill, setOfferModalPrefill] = useState(null); // { fromIdea, ...prefilled fields }
@@ -248,6 +442,8 @@ export default function App({ session, cloudState }) {
   const [isNewDiaryModalOpen, setIsNewDiaryModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [creativeModalState, setCreativeModalState] = useState(null); // { offerId, creative? }
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
 
   // Edit States
   const [editingTask, setEditingTask] = useState(null);
@@ -257,11 +453,20 @@ export default function App({ session, cloudState }) {
 
   // Filter States
   const [pipelineFilter, setPipelineFilter] = useState('todos'); // 'todos' | 'ativas' | 'pausadas' | 'mortas'
+  const [pipelineSearch, setPipelineSearch] = useState('');
   const [kanbanOfferFilter, setKanbanOfferFilter] = useState('all'); // 'all' | 'none' | offerId
   const [diaryTagFilter, setDiaryTagFilter] = useState('all');
   const [diaryOfferFilter, setDiaryOfferFilter] = useState('all');
   const [diarySearchQuery, setDiarySearchQuery] = useState('');
+  const [diaryDateFrom, setDiaryDateFrom] = useState('');
+  const [diaryDateTo, setDiaryDateTo] = useState('');
   const [showAutoDiary, setShowAutoDiary] = useState(true);
+  const [ideasSearch, setIdeasSearch] = useState('');
+  const [ideasView, setIdeasView] = useState('grid'); // 'grid' | 'matrix'
+  const [ideasStatusFilter, setIdeasStatusFilter] = useState('active'); // 'active' | 'archived' | 'all'
+
+  // Metrics sorting
+  const [metricsSort, setMetricsSort] = useState({ key: 'profit', dir: 'desc' });
   
   // Sorting State for Ideas
   const [ideasSortBy, setIdeasSortBy] = useState('potential'); // 'potential' | 'effort' | 'date'
@@ -347,8 +552,9 @@ export default function App({ session, cloudState }) {
   // ==========================================
   // CALCULATIONS / METRICS
   // ==========================================
-  const getOfferStats = (offerId) => {
-    const records = dailyData.filter(d => d.offerId === offerId);
+  const getOfferStats = (offerId, range = null) => {
+    const allRecords = dailyData.filter(d => d.offerId === offerId);
+    const records = range ? allRecords.filter(d => d.date >= range.from && d.date <= range.to) : allRecords;
     const rev = records.reduce((s, r) => s + Number(r.revenue || 0), 0);
     const spend = records.reduce((s, r) => s + Number(r.adSpend || 0), 0);
     const sales = records.reduce((s, r) => s + Number(r.sales || 0), 0);
@@ -382,36 +588,107 @@ export default function App({ session, cloudState }) {
     };
   };
 
-  const totalRevenue = dailyData.reduce((s, d) => s + Number(d.revenue || 0), 0);
-  const totalSpend = dailyData.reduce((s, d) => s + Number(d.adSpend || 0), 0);
-  const totalProfit = totalRevenue - totalSpend;
-  const averageRoas = totalSpend > 0 ? totalRevenue / totalSpend : 0;
+  // Period filtering — returns the cutoff dates for current and previous periods
+  const periodBounds = useMemo(() => {
+    if (periodFilter === 'all') return { current: null, previous: null };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayMs = 24 * 60 * 60 * 1000;
+    const fmt = (d) => d.toISOString().split('T')[0];
 
-  // Best/Worst offer today
+    // Helper: shift a date by days
+    const shift = (d, days) => new Date(d.getTime() + days * dayMs);
+
+    let curStart, curEnd, prevStart, prevEnd;
+
+    if (periodFilter === 'week') {
+      // This week starting Monday
+      const dow = (today.getDay() + 6) % 7; // 0 = Monday
+      curStart = shift(today, -dow);
+      curEnd = shift(curStart, 6);
+      prevEnd = shift(curStart, -1);
+      prevStart = shift(prevEnd, -6);
+    } else if (periodFilter === 'month') {
+      curStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      curEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      prevStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      prevEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    } else if (periodFilter === 'lastMonth') {
+      curStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      curEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+      prevStart = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+      prevEnd = new Date(today.getFullYear(), today.getMonth() - 1, 0);
+    } else {
+      const days = periodFilter === 'today' ? 1 : periodFilter === '7d' ? 7 : 30;
+      curStart = shift(today, -(days - 1));
+      curEnd = new Date(today.getTime() + dayMs - 1);
+      prevStart = shift(curStart, -days);
+      prevEnd = shift(curStart, -1);
+    }
+
+    return {
+      current: { from: fmt(curStart), to: fmt(curEnd) },
+      previous: { from: fmt(prevStart), to: fmt(prevEnd) }
+    };
+  }, [periodFilter]);
+
+  const inPeriod = (dateStr, range) => {
+    if (!range) return true;
+    return dateStr >= range.from && dateStr <= range.to;
+  };
+
+  const dailyDataInPeriod = useMemo(() =>
+    dailyData.filter(d => inPeriod(d.date, periodBounds.current)),
+  [dailyData, periodBounds.current]);
+
+  const dailyDataPrevPeriod = useMemo(() =>
+    dailyData.filter(d => inPeriod(d.date, periodBounds.previous)),
+  [dailyData, periodBounds.previous]);
+
+  const aggregate = (records) => {
+    const revenue = records.reduce((s, d) => s + Number(d.revenue || 0), 0);
+    const spend = records.reduce((s, d) => s + Number(d.adSpend || 0), 0);
+    const sales = records.reduce((s, d) => s + Number(d.sales || 0), 0);
+    return { revenue, spend, profit: revenue - spend, sales, roas: spend > 0 ? revenue / spend : 0 };
+  };
+
+  const currentAgg = useMemo(() => aggregate(dailyDataInPeriod), [dailyDataInPeriod]);
+  const previousAgg = useMemo(() => aggregate(dailyDataPrevPeriod), [dailyDataPrevPeriod]);
+
+  const pctChange = (cur, prev) => {
+    if (prev === 0) return cur > 0 ? 100 : 0;
+    return ((cur - prev) / Math.abs(prev)) * 100;
+  };
+
+  const totalRevenue = currentAgg.revenue;
+  const totalSpend = currentAgg.spend;
+  const totalProfit = currentAgg.profit;
+  const averageRoas = currentAgg.roas;
+
+  // Per-offer ranking respecting the selected period
+  const offerRanking = useMemo(() => {
+    return offers
+      .map(o => {
+        const s = getOfferStats(o.id, periodBounds.current);
+        return { id: o.id, offer: o, name: o.name, ...s };
+      })
+      .sort((a, b) => b.profit - a.profit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offers, dailyData, periodBounds.current]);
+
   let bestOffer = { name: 'Sem dados', profit: 0 };
   let worstOffer = { name: 'Sem dados', profit: 0 };
-  
-  if (offers.length > 0) {
-    const activeStats = offers.map(o => ({
-      id: o.id,
-      offer: o,
-      name: o.name,
-      profit: getOfferStats(o.id).profit
-    }));
-    
-    const sorted = [...activeStats].sort((a, b) => b.profit - a.profit);
-    if (sorted.length > 0) {
-      bestOffer = sorted[0];
-      if (sorted.length > 1) {
-        worstOffer = sorted[sorted.length - 1];
-      }
-    }
+  if (offerRanking.length > 0) {
+    bestOffer = offerRanking[0];
+    if (offerRanking.length > 1) worstOffer = offerRanking[offerRanking.length - 1];
   }
 
-  // Get daily profit and spend trend of all offers combined over the last 7 active dates
-  const uniqueDates = Array.from(new Set(dailyData.map(d => d.date))).sort().slice(-7);
+  // Daily profit/spend trend, respecting period. 'all'/'today' fall back to last 14 active dates.
+  const chartSource = (periodFilter === 'all' || periodFilter === 'today') ? dailyData : dailyDataInPeriod;
+  const chartSliceCount = periodFilter === '30d' ? 30 : 14;
+  const uniqueDates = Array.from(new Set(chartSource.map(d => d.date))).sort().slice(-chartSliceCount);
   const chartData = uniqueDates.map(date => {
-    const dayRecords = dailyData.filter(d => d.date === date);
+    const dayRecords = chartSource.filter(d => d.date === date);
     const rev = dayRecords.reduce((s, r) => s + Number(r.revenue || 0), 0);
     const spend = dayRecords.reduce((s, r) => s + Number(r.adSpend || 0), 0);
     return { date, revenue: rev, spend, profit: rev - spend };
@@ -420,6 +697,17 @@ export default function App({ session, cloudState }) {
   const overallDailyAvg = chartData.length > 0
     ? chartData.reduce((s, d) => s + d.profit, 0) / chartData.length
     : 0;
+
+  // Forecast: projected month-end profit based on current daily average
+  const today = new Date();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const dayOfMonth = today.getDate();
+  const monthStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+  const monthRecords = dailyData.filter(d => d.date >= monthStart);
+  const monthProfitSoFar = monthRecords.reduce((s, r) => s + (Number(r.revenue || 0) - Number(r.adSpend || 0)), 0);
+  const monthRevenueSoFar = monthRecords.reduce((s, r) => s + Number(r.revenue || 0), 0);
+  const projectedMonthProfit = dayOfMonth > 0 ? (monthProfitSoFar / dayOfMonth) * daysInMonth : 0;
+  const projectedMonthRevenue = dayOfMonth > 0 ? (monthRevenueSoFar / dayOfMonth) * daysInMonth : 0;
 
   // ==========================================
   // OPERATIONAL CRITICAL ALERTS LOGIC (UX Boost)
@@ -518,6 +806,33 @@ export default function App({ session, cloudState }) {
     setDraggedOverColumn(null);
   };
 
+  // Pipeline offer drag & drop (move offer between stages)
+  const [draggedOfferId, setDraggedOfferId] = useState(null);
+  const [draggedOverStage, setDraggedOverStage] = useState(null);
+
+  const handleOfferDrop = (targetStageId) => {
+    const offerId = draggedOfferId;
+    setDraggedOfferId(null);
+    setDraggedOverStage(null);
+    if (!offerId) return;
+    const offer = offers.find(o => o.id === offerId);
+    if (!offer) return;
+
+    // Map the visual "pausada" column (which represents pausada/morta) — default to pausada
+    const newStage = targetStageId === 'pausada' ? 'pausada' : targetStageId;
+    if (offer.stage === newStage) return;
+
+    let newStatus = offer.status;
+    if (newStage === 'pausada') newStatus = 'pausada';
+    else if (offer.status !== 'morta') newStatus = 'ativa';
+
+    setOffers(prev => prev.map(o => o.id === offerId
+      ? { ...o, stage: newStage, status: newStatus, previousStage: o.stage, updatedAt: new Date().toISOString() }
+      : o
+    ));
+    toast.success(`"${offer.name}" movida para ${newStage.toUpperCase()}.`);
+  };
+
   // ==========================================
   // ACTIONS HANDLERS
   // ==========================================
@@ -567,6 +882,9 @@ export default function App({ session, cloudState }) {
     // If this offer was created from an idea, remove the idea now
     if (formData.fromIdeaId) {
       setIdeas(prev => prev.filter(i => i.id !== formData.fromIdeaId));
+      toast.success(`Ideia convertida em oferta "${newOffer.name}".`);
+    } else {
+      toast.success(`Oferta "${newOffer.name}" criada.`);
     }
   };
 
@@ -575,29 +893,25 @@ export default function App({ session, cloudState }) {
     setEditingOffer(null);
   };
 
-  const handleDeleteOffer = (offerId) => {
+  const handleDeleteOffer = async (offerId) => {
     const offer = offers.find(o => o.id === offerId);
     if (!offer) return;
     const linkedDaily = dailyData.filter(d => d.offerId === offerId).length;
     const linkedTasks = tasks.filter(t => t.offerId === offerId).length;
     const linkedDiary = diary.filter(dy => dy.offerId === offerId).length;
-    const summary = [
-      `Deletar a oferta "${offer.name}"?`,
-      '',
-      'Também serão removidos PERMANENTEMENTE:',
-      `• ${linkedDaily} registro(s) diário(s)`,
-      `• ${linkedTasks} tarefa(s) vinculada(s)`,
-      `• ${linkedDiary} entrada(s) do diário`,
-      '',
-      'Esta ação não pode ser desfeita.'
-    ].join('\n');
-    if (confirm(summary)) {
-      setOffers(prev => prev.filter(o => o.id !== offerId));
-      setDailyData(prev => prev.filter(d => d.offerId !== offerId));
-      setTasks(prev => prev.filter(t => t.offerId !== offerId));
-      setDiary(prev => prev.filter(dy => dy.offerId !== offerId));
-      setSelectedOfferIdForDrawer(null);
-    }
+    const ok = await askConfirm({
+      title: `Deletar oferta "${offer.name}"?`,
+      body: `Também serão removidos PERMANENTEMENTE:\n• ${linkedDaily} registro(s) diário(s)\n• ${linkedTasks} tarefa(s) vinculada(s)\n• ${linkedDiary} entrada(s) do diário\n\nEsta ação não pode ser desfeita.`,
+      confirmLabel: 'Deletar tudo',
+      danger: true
+    });
+    if (!ok) return;
+    setOffers(prev => prev.filter(o => o.id !== offerId));
+    setDailyData(prev => prev.filter(d => d.offerId !== offerId));
+    setTasks(prev => prev.filter(t => t.offerId !== offerId));
+    setDiary(prev => prev.filter(dy => dy.offerId !== offerId));
+    setSelectedOfferIdForDrawer(null);
+    toast.success(`Oferta "${offer.name}" e ${linkedDaily + linkedTasks + linkedDiary} item(s) vinculados removidos.`);
   };
 
   const handleLogDailyData = (formData) => {
@@ -627,6 +941,7 @@ export default function App({ session, cloudState }) {
       isAuto: true,
       createdAt: new Date().toISOString()
     }, ...prev]);
+    toast.success(`Dia registrado: ${R(newRecord.revenue)} fat / ${R(profit)} lucro${roas !== 'N/A' ? ` (ROAS ${roas}x)` : ''}.`);
   };
 
   const handleUpdateDailyRecord = (updated) => {
@@ -639,12 +954,14 @@ export default function App({ session, cloudState }) {
       bumps: Number(updated.bumps || 0)
     } : d));
     setEditingDailyRecord(null);
+    toast.success('Registro atualizado.');
   };
 
-  const handleDeleteDailyRecord = (recordId) => {
-    if (confirm('Deletar este registro diário?')) {
-      setDailyData(prev => prev.filter(d => d.id !== recordId));
-    }
+  const handleDeleteDailyRecord = async (recordId) => {
+    const ok = await askConfirm({ title: 'Deletar registro diário?', confirmLabel: 'Deletar', danger: true });
+    if (!ok) return;
+    setDailyData(prev => prev.filter(d => d.id !== recordId));
+    toast.success('Registro diário removido.');
   };
 
   const handleSaveCreative = (offerId, payload) => {
@@ -689,8 +1006,9 @@ export default function App({ session, cloudState }) {
     }));
   };
 
-  const handleDeleteCreative = (offerId, creativeId) => {
-    if (confirm('Deletar este criativo?')) {
+  const handleDeleteCreative = async (offerId, creativeId) => {
+    const ok = await askConfirm({ title: 'Deletar criativo?', confirmLabel: 'Deletar', danger: true });
+    if (ok) {
       setOffers(prev => prev.map(o => {
         if (o.id === offerId) {
           return {
@@ -723,11 +1041,12 @@ export default function App({ session, cloudState }) {
     setEditingTask(null);
   };
 
-  const handleDeleteTask = (taskId) => {
-    if (confirm('Deletar esta tarefa?')) {
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-      setEditingTask(null);
-    }
+  const handleDeleteTask = async (taskId) => {
+    const ok = await askConfirm({ title: 'Deletar tarefa?', confirmLabel: 'Deletar', danger: true });
+    if (!ok) return;
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    setEditingTask(null);
+    toast.success('Tarefa removida.');
   };
 
   const handleCreateIdea = (formData) => {
@@ -751,10 +1070,12 @@ export default function App({ session, cloudState }) {
     setEditingIdea(null);
   };
 
-  const handleDeleteIdea = (ideaId) => {
-    if (confirm('Deletar esta ideia?')) {
+  const handleDeleteIdea = async (ideaId) => {
+    const ok = await askConfirm({ title: 'Deletar ideia?', confirmLabel: 'Deletar', danger: true });
+    if (ok) {
       setIdeas(prev => prev.filter(i => i.id !== ideaId));
       setEditingIdea(null);
+      toast.success('Ideia removida.');
     }
   };
 
@@ -790,10 +1111,12 @@ export default function App({ session, cloudState }) {
     setEditingDiary(null);
   };
 
-  const handleDeleteDiary = (diaryId) => {
-    if (confirm('Deletar esta entrada do diário?')) {
+  const handleDeleteDiary = async (diaryId) => {
+    const ok = await askConfirm({ title: 'Deletar entrada do diário?', confirmLabel: 'Deletar', danger: true });
+    if (ok) {
       setDiary(prev => prev.filter(dy => dy.id !== diaryId));
       setEditingDiary(null);
+      toast.success('Entrada removida.');
     }
   };
 
@@ -813,27 +1136,28 @@ export default function App({ session, cloudState }) {
     URL.revokeObjectURL(url);
   };
 
+
   const activeOfferForDrawer = offers.find(o => o.id === selectedOfferIdForDrawer);
 
   return (
     <div className={`app-container ${theme === 'dark' ? 'dark-theme' : ''}`}>
       
       {/* ────────────────── SIDEBAR ────────────────── */}
-      <aside className="sidebar">
+      <div
+        className={`sidebar-backdrop ${isSidebarOpenMobile ? 'is-open' : ''}`}
+        onClick={() => setIsSidebarOpenMobile(false)}
+      />
+      <aside className={`sidebar ${isSidebarOpenMobile ? 'is-open' : ''}`} onClick={() => setIsSidebarOpenMobile(false)}>
         <div>
           {/* Operai logo */}
           <div style={{
-            padding: '8px 8px 14px 8px',
+            padding: '10px 8px 16px 8px',
             marginBottom: '12px',
             borderBottom: '1px solid var(--border)',
             display: 'flex',
             justifyContent: 'center'
           }}>
-            <img
-              src="/operai-logo.svg"
-              alt="Operai"
-              style={{ width: '100%', maxWidth: '160px', height: 'auto', display: 'block' }}
-            />
+            <img src="/operai-logo.svg" alt="Operai" className="operai-logo" />
           </div>
 
           {/* Navigation Links */}
@@ -940,8 +1264,8 @@ export default function App({ session, cloudState }) {
               <span style={{ fontSize: '13px' }}>Diário</span>
             </button>
 
-            <button 
-              className="btn" 
+            <button
+              className="btn"
               onClick={() => setActivePage('utils')}
               style={{
                 width: '100%',
@@ -956,6 +1280,7 @@ export default function App({ session, cloudState }) {
               <Calculator size={16} color={activePage === 'utils' ? 'var(--accent)' : 'currentColor'} />
               <span style={{ fontSize: '13px' }}>Calculadora & UTM</span>
             </button>
+
           </nav>
         </div>
 
@@ -1026,7 +1351,15 @@ export default function App({ session, cloudState }) {
         
         {/* ── TOP HEADER ── */}
         <header className="header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              className="mobile-menu-btn"
+              onClick={() => setIsSidebarOpenMobile(true)}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: 0, display: 'none' }}
+              aria-label="Abrir menu"
+            >
+              <Menu size={20} />
+            </button>
             <h2 style={{ fontSize: '16px', color: 'var(--text)' }}>
               {activePage === 'dashboard' && 'Dashboard Operacional'}
               {activePage === 'pipeline' && 'Pipeline de Ofertas'}
@@ -1036,6 +1369,23 @@ export default function App({ session, cloudState }) {
               {activePage === 'diary' && 'Diário de Operações'}
               {activePage === 'utils' && 'Calculadora de Tráfego & Gerador UTM'}
             </h2>
+            {['dashboard', 'metrics', 'pipeline'].includes(activePage) && (
+              <PeriodPicker value={periodFilter} onChange={setPeriodFilter} />
+            )}
+            <button
+              onClick={() => setIsCommandPaletteOpen(true)}
+              title="Buscar / Comandos (Ctrl+K)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                fontSize: '11px', color: 'var(--text2)',
+                backgroundColor: 'var(--bg3)', border: '1px solid var(--border)',
+                borderRadius: '6px', padding: '5px 10px', cursor: 'pointer'
+              }}
+            >
+              <Search size={12} />
+              <span style={{ marginRight: '4px' }}>Buscar...</span>
+              <kbd style={kbdStyle}>Ctrl</kbd><kbd style={kbdStyle}>K</kbd>
+            </button>
           </div>
 
           {/* Goal Progress bar */}
@@ -1097,8 +1447,10 @@ export default function App({ session, cloudState }) {
               PAGE 0: DASHBOARD (Novo Core Landing de UX Avançado)
               ======================================================== */}
           {activePage === 'dashboard' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+              <PeriodBanner periodFilter={periodFilter} periodBounds={periodBounds} suffix="KPIs, gráfico e ranking refletem este período." />
+
               {/* Critical alerts banner (if any) */}
               {criticalAlertsList.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1134,46 +1486,76 @@ export default function App({ session, cloudState }) {
 
               {/* Top Widgets Summary */}
               <div className="dashboard-grid">
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text2)' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 'bold' }}>FATURAMENTO ACUMULADO</span>
-                    <DollarSign size={14} />
-                  </div>
-                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent)' }}>{R(totalRevenue)}</span>
-                </div>
+                <KpiCard
+                  label="FATURAMENTO"
+                  value={R(totalRevenue)}
+                  delta={periodFilter !== 'all' ? pctChange(currentAgg.revenue, previousAgg.revenue) : null}
+                  icon={DollarSign}
+                  color="var(--accent)"
+                  trend={chartData.map(d => d.revenue)}
+                />
+                <KpiCard
+                  label="LUCRO LÍQUIDO"
+                  value={R(totalProfit)}
+                  delta={periodFilter !== 'all' ? pctChange(currentAgg.profit, previousAgg.profit) : null}
+                  icon={Flame}
+                  color={totalProfit >= 0 ? 'var(--green)' : 'var(--red)'}
+                  trend={chartData.map(d => d.profit)}
+                />
+                <KpiCard
+                  label="INVESTIMENTO EM ADS"
+                  value={R(totalSpend)}
+                  delta={periodFilter !== 'all' ? pctChange(currentAgg.spend, previousAgg.spend) : null}
+                  deltaInverse
+                  icon={Activity}
+                  color="var(--red)"
+                  trend={chartData.map(d => d.spend)}
+                />
+                <KpiCard
+                  label="ROAS MÉDIO"
+                  value={Roas(averageRoas) + 'x'}
+                  delta={periodFilter !== 'all' && previousAgg.roas > 0 ? pctChange(currentAgg.roas, previousAgg.roas) : null}
+                  icon={Target}
+                  color={averageRoas >= 1.5 ? 'var(--green)' : 'var(--text)'}
+                  trend={chartData.map(d => d.spend > 0 ? d.revenue / d.spend : 0)}
+                />
+              </div>
 
+              {/* Projection / forecast strip */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text2)' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 'bold' }}>LUCRO LÍQUIDO</span>
-                    <Flame size={14} color="var(--green)" />
+                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em' }}>LUCRO DO MÊS (ATÉ HOJE)</span>
+                    <Calendar size={13} color="var(--accent)" />
                   </div>
-                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--green)' }}>{R(totalProfit)}</span>
+                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: monthProfitSoFar >= 0 ? 'var(--green)' : 'var(--red)' }}>{R(monthProfitSoFar)}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text3)' }}>{dayOfMonth} de {daysInMonth} dias</span>
                 </div>
-
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text2)' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 'bold' }}>INVESTIMENTO EM ADS</span>
-                    <Activity size={14} color="var(--red)" />
+                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em' }}>PROJEÇÃO FIM DO MÊS</span>
+                    <TrendingUp size={13} color="var(--accent2)" />
                   </div>
-                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--text)' }}>{R(totalSpend)}</span>
+                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent2)' }}>{R(projectedMonthProfit)}</span>
+                  <span style={{ fontSize: '10px', color: 'var(--text3)' }}>lucro · {R(projectedMonthRevenue)} faturamento</span>
                 </div>
-
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text2)' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 'bold' }}>ROAS MÉDIO DA OPERAÇÃO</span>
-                    <Target size={14} color="var(--accent2)" />
+                    <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em' }}>META MENSAL ({R(globalDailyGoal * daysInMonth)})</span>
+                    <Target size={13} color={projectedMonthProfit >= globalDailyGoal * daysInMonth ? 'var(--green)' : 'var(--yellow)'} />
                   </div>
-                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: averageRoas >= 1.5 ? 'var(--green)' : 'var(--text)' }}>
-                    {Roas(averageRoas)}x
+                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: projectedMonthProfit >= globalDailyGoal * daysInMonth ? 'var(--green)' : 'var(--text)' }}>
+                    {Pct(globalDailyGoal * daysInMonth > 0 ? (projectedMonthProfit / (globalDailyGoal * daysInMonth)) * 100 : 0)}
                   </span>
+                  <span style={{ fontSize: '10px', color: 'var(--text3)' }}>da meta na projeção atual</span>
                 </div>
               </div>
 
-              {/* Main SVG Area Chart: Revenue vs Spend vs Profit (Past 7 dates) */}
+              {/* Main SVG Area Chart: Revenue vs Spend vs Profit */}
               <div className="card" style={{ padding: '20px' }}>
                 <h3 style={{ fontSize: '14px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <TrendingUp size={16} color="var(--accent)" />
-                  <span>Histórico do Lucro vs. Investimento (Últimos 7 dias cadastrados)</span>
+                  <span>Lucro vs. Investimento — {periodLabel(periodFilter, periodBounds)}</span>
                 </h3>
                 {chartData.length > 1 ? (
                   <div style={{ width: '100%' }}>
@@ -1181,10 +1563,47 @@ export default function App({ session, cloudState }) {
                   </div>
                 ) : (
                   <div style={{ padding: '36px', textAlign: 'center', color: 'var(--text3)', border: '1px dashed var(--border)', borderRadius: '8px' }}>
-                    Cadastre dados diários de faturamento e anúncios na aba "Métricas" para renderizar o gráfico histórico.
+                    Sem dados suficientes neste período. Registre dias na aba "Métricas" ou amplie o período no topo.
                   </div>
                 )}
               </div>
+
+              {/* Per-offer ranking for the selected period */}
+              {offerRanking.some(r => r.revenue > 0 || r.spend > 0) && (
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <BarChart3 size={15} color="var(--accent)" /> Ranking de Ofertas — {periodLabel(periodFilter, periodBounds)}
+                    </h3>
+                    <button className="btn" onClick={() => setActivePage('metrics')} style={{ fontSize: '11px', padding: 0, color: 'var(--accent)', border: 'none', background: 'transparent' }}>
+                      Ver tudo <ArrowUpRight size={12} />
+                    </button>
+                  </div>
+                  <div>
+                    {offerRanking.filter(r => r.revenue > 0 || r.spend > 0).slice(0, 6).map((r, idx) => {
+                      const maxProfit = Math.max(...offerRanking.map(x => Math.abs(x.profit)), 1);
+                      const barPct = Math.min(100, (Math.abs(r.profit) / maxProfit) * 100);
+                      return (
+                        <div key={r.id} onClick={() => setSelectedOfferIdForDrawer(r.id)} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }} className="table-row-hover">
+                          <span style={{ fontSize: '11px', color: 'var(--text3)', width: '16px', fontWeight: 700 }}>{idx + 1}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <span style={{ fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><OfferLabel offer={r.offer} iconSize={12} /></span>
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: r.profit >= 0 ? 'var(--green)' : 'var(--red)' }}>{R(r.profit)}</span>
+                            </div>
+                            <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
+                              <div style={{ width: `${barPct}%`, height: '100%', backgroundColor: r.profit >= 0 ? 'var(--green)' : 'var(--red)' }} />
+                            </div>
+                          </div>
+                          <span style={{ fontSize: '11px', color: r.roas >= 1.5 ? 'var(--green)' : r.roas > 0 ? 'var(--red)' : 'var(--text3)', fontWeight: 600, width: '52px', textAlign: 'right' }}>
+                            {r.roas > 0 ? Roas(r.roas) + 'x' : '—'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Split Content: Quick Actions & Operational Summary */}
               <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '20px' }}>
@@ -1306,28 +1725,50 @@ export default function App({ session, cloudState }) {
               ======================================================== */}
           {activePage === 'pipeline' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
-              
+
               {/* Pipeline controls */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  {['todos', 'ativas', 'pausadas', 'mortas'].map(filter => (
-                    <button
-                      key={filter}
-                      className="btn"
-                      onClick={() => setPipelineFilter(filter)}
-                      style={{
-                        padding: '6px 12px',
-                        fontSize: '12px',
-                        backgroundColor: pipelineFilter === filter ? 'var(--border)' : 'transparent',
-                        border: '1px solid var(--border)',
-                        color: pipelineFilter === filter ? 'var(--text)' : 'var(--text2)',
-                      }}
-                    >
-                      {filter.toUpperCase()}
-                    </button>
-                  ))}
+                  {['todos', 'ativas', 'pausadas', 'mortas'].map(filter => {
+                    const count = offers.filter(o => {
+                      if (filter === 'todos') return true;
+                      return o.status === filter.replace(/s$/, '') || (filter === 'mortas' && o.status === 'morta') || (filter === 'pausadas' && o.status === 'pausada') || (filter === 'ativas' && o.status === 'ativa');
+                    }).length;
+                    return (
+                      <button
+                        key={filter}
+                        className="btn"
+                        onClick={() => setPipelineFilter(filter)}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          backgroundColor: pipelineFilter === filter ? 'var(--bg3)' : 'transparent',
+                          border: '1px solid ' + (pipelineFilter === filter ? 'var(--border2)' : 'var(--border)'),
+                          color: pipelineFilter === filter ? 'var(--text)' : 'var(--text2)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        {filter.toUpperCase()}
+                        <span style={{ fontSize: '10px', backgroundColor: 'var(--border)', color: 'var(--text2)', padding: '1px 6px', borderRadius: '4px' }}>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ position: 'relative', width: '260px', maxWidth: '40vw' }}>
+                  <Search size={12} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
+                  <input
+                    type="text"
+                    placeholder="Buscar oferta por nome..."
+                    value={pipelineSearch}
+                    onChange={(e) => setPipelineSearch(e.target.value)}
+                    style={{ paddingLeft: '30px', fontSize: '12px', padding: '6px 10px 6px 30px' }}
+                  />
                 </div>
               </div>
+
+              <PeriodBanner periodFilter={periodFilter} periodBounds={periodBounds} suffix="Métricas dos cards refletem este período." />
 
               {/* Pipeline Columns - Scroll Horizontal container */}
               <div style={{ 
@@ -1352,26 +1793,32 @@ export default function App({ session, cloudState }) {
                       if (o.stage !== col.id) return false;
                     }
 
+                    if (pipelineSearch && !o.name.toLowerCase().includes(pipelineSearch.toLowerCase())) return false;
                     if (pipelineFilter === 'ativas') return o.status === 'ativa';
                     if (pipelineFilter === 'pausadas') return o.status === 'pausada';
                     if (pipelineFilter === 'mortas') return o.status === 'morta';
                     return true;
                   });
 
+                  const isDragOver = draggedOverStage === col.id;
                   return (
-                    <div 
-                      key={col.id} 
-                      style={{ 
+                    <div
+                      key={col.id}
+                      onDragOver={(e) => { if (draggedOfferId) { e.preventDefault(); setDraggedOverStage(col.id); } }}
+                      onDragLeave={() => setDraggedOverStage(null)}
+                      onDrop={(e) => { e.preventDefault(); handleOfferDrop(col.id); }}
+                      style={{
                         flex: '0 0 280px',
                         width: '280px',
-                        backgroundColor: col.bg,
-                        border: '1px solid var(--border)',
+                        backgroundColor: isDragOver ? 'rgba(99, 102, 241, 0.08)' : col.bg,
+                        border: '1px solid ' + (isDragOver ? 'var(--accent)' : 'var(--border)'),
                         borderRadius: '10px',
                         padding: '12px',
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'space-between',
-                        minHeight: '400px'
+                        minHeight: '400px',
+                        transition: 'background-color 120ms ease, border-color 120ms ease'
                       }}
                     >
                       {/* Column Header */}
@@ -1387,7 +1834,7 @@ export default function App({ session, cloudState }) {
                       {/* Offer cards list */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, overflowY: 'auto', marginBottom: '12px' }}>
                         {colOffers.map(offer => {
-                          const stats = getOfferStats(offer.id);
+                          const stats = getOfferStats(offer.id, periodBounds.current);
                           const activeCreativesCount = offer.creatives ? offer.creatives.filter(c => c.status === 'ativo').length : 0;
                           
                           let leftBorderColor = 'var(--border2)';
@@ -1402,29 +1849,56 @@ export default function App({ session, cloudState }) {
                           const launchDaysText = formatLaunchText(offer.launchDate);
 
                           return (
-                            <div 
-                              key={offer.id} 
+                            <div
+                              key={offer.id}
                               className="card"
+                              draggable
+                              onDragStart={(e) => { setDraggedOfferId(offer.id); e.dataTransfer.effectAllowed = 'move'; }}
+                              onDragEnd={() => { setDraggedOfferId(null); setDraggedOverStage(null); }}
                               onClick={() => setSelectedOfferIdForDrawer(offer.id)}
-                              style={{ 
-                                cursor: 'pointer',
+                              style={{
+                                cursor: draggedOfferId === offer.id ? 'grabbing' : 'pointer',
                                 padding: '12px',
-                                borderLeft: `3px solid ${leftBorderColor}`
+                                borderLeft: `3px solid ${leftBorderColor}`,
+                                opacity: draggedOfferId === offer.id ? 0.5 : 1
                               }}
                             >
-                              {/* Title line */}
+                              {/* Title line + health dot */}
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                                 <h4 style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <span title={
+                                    stats.roas >= 2.5 ? 'Saúde excelente' :
+                                    stats.roas >= 1.5 ? 'Saúde boa' :
+                                    stats.roas >= 1.0 ? 'Atenção' :
+                                    stats.roas > 0 ? 'Crítico' : 'Sem dados'
+                                  } style={{
+                                    width: '8px', height: '8px', borderRadius: '50%',
+                                    backgroundColor: leftBorderColor,
+                                    flexShrink: 0
+                                  }} />
                                   <OfferIcon offer={offer} size={14} color="var(--accent)" />
                                   <span>{offer.name}</span>
                                 </h4>
-                                <div style={{ display: 'flex', gap: '4px' }}>
-                                  <button 
-                                    className="btn" 
+                                <div style={{ display: 'flex', gap: '2px' }}>
+                                  <button
+                                    className="btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedOfferIdForDrawer(offer.id);
+                                      setIsDailyDataDrawerOpen(true);
+                                    }}
+                                    title="Registrar dia para esta oferta"
+                                    style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: 'var(--accent)' }}
+                                  >
+                                    <Plus size={12} />
+                                  </button>
+                                  <button
+                                    className="btn"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setEditingOffer(offer);
                                     }}
+                                    title="Editar oferta"
                                     style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: 'var(--text3)' }}
                                   >
                                     <Edit size={12} />
@@ -1464,6 +1938,13 @@ export default function App({ session, cloudState }) {
                                 </div>
                               </div>
 
+                              {/* ROAS sparkline (last 7 days) */}
+                              {stats.roasTrend.length > 1 && (
+                                <div style={{ marginTop: '4px', marginBottom: '4px' }}>
+                                  <KpiSparkline values={stats.roasTrend} color={leftBorderColor} />
+                                </div>
+                              )}
+
                               <hr style={{ border: 'none', borderBottom: '1px solid var(--border)', margin: '8px 0' }} />
 
                               {/* Goal Progress bar */}
@@ -1487,16 +1968,30 @@ export default function App({ session, cloudState }) {
                               <hr style={{ border: 'none', borderBottom: '1px solid var(--border)', margin: '8px 0' }} />
 
                               {/* Footer details */}
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px', color: 'var(--text2)' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <Calendar size={10} />
-                                  <span>{launchDaysText}</span>
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <Sparkles size={10} color="var(--yellow)" />
-                                  <span>{activeCreativesCount} criativos ativos</span>
-                                </div>
-                              </div>
+                              {(() => {
+                                const checklist = offer.checklist || {};
+                                const checklistTotal = 7; // entregavel, pagina, checkout, pixel, criativos, campanhas, bumps
+                                const checklistDone = Object.values(checklist).filter(Boolean).length;
+                                const checklistComplete = checklistDone === checklistTotal;
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '9px', color: 'var(--text2)' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <Calendar size={10} />
+                                      <span>{launchDaysText}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <Sparkles size={10} color="var(--yellow)" />
+                                      <span>{activeCreativesCount} criativo(s) ativo(s)</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <CheckCircle2 size={10} color={checklistComplete ? 'var(--green)' : 'var(--text3)'} />
+                                      <span style={{ color: checklistComplete ? 'var(--green)' : 'var(--text2)' }}>
+                                        Setup {checklistDone}/{checklistTotal}{checklistComplete ? ' ✓' : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                             </div>
                           );
@@ -1526,15 +2021,15 @@ export default function App({ session, cloudState }) {
               ======================================================== */}
           {activePage === 'kanban' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
-              
+
               {/* Filters / Headers */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '13px', color: 'var(--text2)', fontWeight: '500' }}>Filtrar por Oferta:</span>
                   <select
                     value={kanbanOfferFilter}
                     onChange={(e) => setKanbanOfferFilter(e.target.value)}
-                    style={{ width: '180px', padding: '6px 12px' }}
+                    style={{ width: '200px', padding: '6px 12px' }}
                   >
                     <option value="all">Todas as Ofertas</option>
                     <option value="none">Apenas Gerais (sem oferta)</option>
@@ -1542,6 +2037,18 @@ export default function App({ session, cloudState }) {
                       <option key={o.id} value={o.id}>{o.name}</option>
                     ))}
                   </select>
+                  {(() => {
+                    const overdue = tasks.filter(t => t.column !== 'done' && t.deadline && t.deadline < new Date().toISOString().split('T')[0]).length;
+                    const total = tasks.filter(t => t.column !== 'done').length;
+                    const high = tasks.filter(t => t.column !== 'done' && t.priority === 'alta').length;
+                    return (
+                      <div style={{ display: 'flex', gap: '8px', fontSize: '11px' }}>
+                        <span className="badge badge-gray">{total} pendentes</span>
+                        {high > 0 && <span className="badge badge-red">{high} alta prioridade</span>}
+                        {overdue > 0 && <span className="badge badge-yellow">{overdue} atrasada(s)</span>}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -1668,31 +2175,89 @@ export default function App({ session, cloudState }) {
               ======================================================== */}
           {activePage === 'ideas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              
+
               {/* Header and Sorting */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text2)', fontWeight: '500' }}>Ordenar por:</span>
-                  <select 
-                    value={ideasSortBy} 
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select
+                    value={ideasSortBy}
                     onChange={(e) => setIdeasSortBy(e.target.value)}
-                    style={{ width: '150px', padding: '6px 12px' }}
+                    style={{ width: '160px', padding: '6px 12px' }}
                   >
+                    <option value="ice">Melhor Score (ICE)</option>
                     <option value="potential">Maior Potencial</option>
                     <option value="effort">Menor Esforço</option>
                     <option value="date">Mais Recente</option>
                   </select>
+                  <select
+                    value={ideasStatusFilter}
+                    onChange={(e) => setIdeasStatusFilter(e.target.value)}
+                    style={{ width: '140px', padding: '6px 12px' }}
+                  >
+                    <option value="active">Ativas</option>
+                    <option value="archived">Arquivadas</option>
+                    <option value="all">Todas</option>
+                  </select>
+                  <div style={{ position: 'relative', width: '240px' }}>
+                    <Search size={12} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
+                    <input
+                      type="text"
+                      placeholder="Buscar ideias..."
+                      value={ideasSearch}
+                      onChange={(e) => setIdeasSearch(e.target.value)}
+                      style={{ paddingLeft: '30px', fontSize: '12px', padding: '6px 10px 6px 30px' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'inline-flex', backgroundColor: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: '6px', padding: '2px' }}>
+                  {[
+                    { id: 'grid', label: 'Grade' },
+                    { id: 'matrix', label: 'Matriz' }
+                  ].map(v => (
+                    <button
+                      key={v.id}
+                      onClick={() => setIdeasView(v.id)}
+                      style={{
+                        backgroundColor: ideasView === v.id ? 'var(--bg2)' : 'transparent',
+                        color: ideasView === v.id ? 'var(--text)' : 'var(--text2)',
+                        border: ideasView === v.id ? '1px solid var(--border2)' : '1px solid transparent',
+                        borderRadius: '4px', padding: '3px 10px', fontSize: '11px', fontWeight: 500, cursor: 'pointer'
+                      }}
+                    >
+                      {v.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Ideas Grid */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
-                gap: '16px' 
+              {ideasView === 'matrix' ? (
+                <IdeasMatrix
+                  ideas={ideas.filter(i => {
+                    if (ideasStatusFilter === 'active') return !i.archived;
+                    if (ideasStatusFilter === 'archived') return !!i.archived;
+                    return true;
+                  }).filter(i => !ideasSearch.trim() || (i.name + ' ' + (i.description || '') + ' ' + (i.notes || '')).toLowerCase().includes(ideasSearch.toLowerCase()))}
+                  onEdit={setEditingIdea}
+                  onConvert={handleMoveIdeaToPipeline}
+                />
+              ) : (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                gap: '16px'
               }}>
                 {[...ideas]
+                  .filter(i => {
+                    if (ideasStatusFilter === 'active') return !i.archived;
+                    if (ideasStatusFilter === 'archived') return !!i.archived;
+                    return true;
+                  })
+                  .filter(i => !ideasSearch.trim() || (i.name + ' ' + (i.description || '') + ' ' + (i.notes || '')).toLowerCase().includes(ideasSearch.toLowerCase()))
                   .sort((a, b) => {
+                    if (ideasSortBy === 'ice') {
+                      const ice = (x) => (Number(x.potential || 0) * 2) / Math.max(Number(x.effort || 1), 1);
+                      return ice(b) - ice(a);
+                    }
                     if (ideasSortBy === 'potential') return b.potential - a.potential;
                     if (ideasSortBy === 'effort') return a.effort - b.effort;
                     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -1706,17 +2271,42 @@ export default function App({ session, cloudState }) {
                             <h3 style={{ fontSize: '15px', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <Lightbulb size={16} color="var(--yellow)" />
                               <span>{idea.name}</span>
+                              {idea.archived && <span className="badge badge-gray" style={{ fontSize: '9px' }}>ARQ</span>}
                             </h3>
-                            <div style={{ display: 'flex', gap: '4px' }}>
-                              <button 
-                                className="btn" 
+                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                              {(() => {
+                                const iceScore = (Number(idea.potential || 0) * 2) / Math.max(Number(idea.effort || 1), 1);
+                                return (
+                                  <span title="Score ICE: (Potencial × 2) ÷ Esforço" style={{
+                                    fontSize: '10px',
+                                    fontWeight: 700,
+                                    backgroundColor: iceScore >= 3 ? 'var(--green-dim)' : iceScore >= 1.5 ? 'var(--yellow-dim)' : 'var(--red-dim)',
+                                    color: iceScore >= 3 ? 'var(--green)' : iceScore >= 1.5 ? 'var(--yellow)' : 'var(--red)',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    fontFamily: 'monospace'
+                                  }}>
+                                    {iceScore.toFixed(1)}
+                                  </span>
+                                );
+                              })()}
+                              <button
+                                className="btn"
+                                onClick={() => setIdeas(prev => prev.map(i => i.id === idea.id ? { ...i, archived: !i.archived } : i))}
+                                title={idea.archived ? 'Reativar ideia' : 'Arquivar ideia'}
+                                style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: 'var(--text3)' }}
+                              >
+                                <Package size={12} />
+                              </button>
+                              <button
+                                className="btn"
                                 onClick={() => setEditingIdea(idea)}
                                 style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: 'var(--text3)' }}
                               >
                                 <Edit size={12} />
                               </button>
-                              <button 
-                                className="btn" 
+                              <button
+                                className="btn"
                                 onClick={() => handleDeleteIdea(idea.id)}
                                 style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: 'var(--red)' }}
                               >
@@ -1805,6 +2395,7 @@ export default function App({ session, cloudState }) {
                   </div>
                 )}
               </div>
+              )}
 
             </div>
           )}
@@ -1813,8 +2404,10 @@ export default function App({ session, cloudState }) {
               PAGE 4: MÉTRICAS
               ======================================================== */}
           {activePage === 'metrics' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+              <PeriodBanner periodFilter={periodFilter} periodBounds={periodBounds} suffix="Todos os números abaixo refletem este período." />
+
               {/* KPIs Gerais */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
                 <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -1851,27 +2444,93 @@ export default function App({ session, cloudState }) {
               <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
                 <div style={{ padding: '16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ fontSize: '14px', color: 'var(--text)' }}>Performance Geral por Oferta</h3>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      const rows = [['Oferta','Estagio','Status','DiasAtiva','Faturamento','Investido','Lucro','ROAS','CPA','Vendas']];
+                      offers.forEach(o => {
+                        const s = getOfferStats(o.id, periodBounds.current);
+                        const d = o.launchDate ? daysSince(o.launchDate) : '';
+                        rows.push([
+                          o.name, o.stage, o.status, d ?? '',
+                          s.revenue.toFixed(2), s.spend.toFixed(2), s.profit.toFixed(2),
+                          s.roas.toFixed(2), s.cpa.toFixed(2), s.sales
+                        ]);
+                      });
+                      const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+                      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+                      const link = document.createElement('a');
+                      link.href = URL.createObjectURL(blob);
+                      link.download = `metricas-${new Date().toISOString().split('T')[0]}.csv`;
+                      link.click();
+                      URL.revokeObjectURL(link.href);
+                      toast.success('CSV de métricas exportado.');
+                    }}
+                    style={{ fontSize: '11px', padding: '6px 10px' }}
+                  >
+                    <DownloadIcon size={12} /> Exportar CSV
+                  </button>
                 </div>
 
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                     <thead>
                       <tr style={{ backgroundColor: 'var(--bg3)', borderBottom: '1px solid var(--border)' }}>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>Oferta</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>Estágio</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>Dias Ativa</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>Faturamento</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>Investido</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>Lucro</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>ROAS</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>CPA</th>
-                        <th style={{ padding: '12px 16px', color: 'var(--text2)', fontWeight: '500' }}>Tendência (7d)</th>
+                        {[
+                          { key: 'name', label: 'Oferta' },
+                          { key: 'stage', label: 'Estágio' },
+                          { key: 'days', label: 'Dias Ativa' },
+                          { key: 'revenue', label: 'Faturamento' },
+                          { key: 'spend', label: 'Investido' },
+                          { key: 'profit', label: 'Lucro' },
+                          { key: 'roas', label: 'ROAS' },
+                          { key: 'cpa', label: 'CPA' },
+                          { key: 'trend', label: 'Tendência (7d)', noSort: true }
+                        ].map(h => {
+                          const isActive = metricsSort.key === h.key;
+                          return (
+                            <th
+                              key={h.key}
+                              onClick={() => !h.noSort && setMetricsSort(prev => ({
+                                key: h.key,
+                                dir: prev.key === h.key && prev.dir === 'desc' ? 'asc' : 'desc'
+                              }))}
+                              style={{
+                                padding: '12px 16px', color: isActive ? 'var(--accent)' : 'var(--text2)', fontWeight: '500',
+                                cursor: h.noSort ? 'default' : 'pointer', userSelect: 'none', whiteSpace: 'nowrap'
+                              }}
+                            >
+                              {h.label}
+                              {isActive && (metricsSort.dir === 'asc' ? <ArrowUp size={10} style={{ marginLeft: '4px', verticalAlign: 'middle' }} /> : <ArrowDown size={10} style={{ marginLeft: '4px', verticalAlign: 'middle' }} />)}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody>
-                      {offers.map(offer => {
-                        const stats = getOfferStats(offer.id);
-                        
+                      {[...offers].sort((a, b) => {
+                        const sa = getOfferStats(a.id, periodBounds.current);
+                        const sb = getOfferStats(b.id, periodBounds.current);
+                        const valFor = (o, s) => {
+                          switch (metricsSort.key) {
+                            case 'name': return o.name.toLowerCase();
+                            case 'stage': return o.stage;
+                            case 'days': return daysSince(o.launchDate) ?? -1;
+                            case 'revenue': return s.revenue;
+                            case 'spend': return s.spend;
+                            case 'profit': return s.profit;
+                            case 'roas': return s.roas;
+                            case 'cpa': return s.cpa;
+                            default: return 0;
+                          }
+                        };
+                        const va = valFor(a, sa);
+                        const vb = valFor(b, sb);
+                        const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+                        return metricsSort.dir === 'asc' ? cmp : -cmp;
+                      }).map(offer => {
+                        const stats = getOfferStats(offer.id, periodBounds.current);
+
                         let launchDays = '—';
                         if (offer.launchDate) {
                           const d = daysSince(offer.launchDate);
@@ -2041,11 +2700,50 @@ export default function App({ session, cloudState }) {
               ======================================================== */}
           {activePage === 'diary' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              
+
+              {/* Tag counters strip */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setDiaryTagFilter('all')}
+                  className="btn"
+                  style={{
+                    padding: '4px 10px', fontSize: '11px',
+                    backgroundColor: diaryTagFilter === 'all' ? 'var(--bg3)' : 'transparent',
+                    border: '1px solid ' + (diaryTagFilter === 'all' ? 'var(--border2)' : 'var(--border)'),
+                    color: 'var(--text2)'
+                  }}
+                >
+                  Todas <span style={{ marginLeft: '4px', color: 'var(--text3)' }}>{diary.length}</span>
+                </button>
+                {DIARY_TAGS.map(t => {
+                  const TagIcon = t.Icon;
+                  const count = diary.filter(d => d.tag === t.key).length;
+                  const active = diaryTagFilter === t.key;
+                  return (
+                    <button
+                      key={t.key}
+                      onClick={() => setDiaryTagFilter(active ? 'all' : t.key)}
+                      className="btn"
+                      style={{
+                        padding: '4px 10px', fontSize: '11px',
+                        backgroundColor: active ? 'var(--bg3)' : 'transparent',
+                        border: '1px solid ' + (active ? 'var(--border2)' : 'var(--border)'),
+                        color: active ? 'var(--text)' : 'var(--text2)',
+                        display: 'inline-flex', alignItems: 'center', gap: '5px'
+                      }}
+                    >
+                      <TagIcon size={11} />
+                      {t.label}
+                      <span style={{ color: 'var(--text3)' }}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               {/* Toolbar */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '2fr 1fr 1fr auto 120px',
+                gridTemplateColumns: '2fr 1fr auto auto auto auto',
                 gap: '12px',
                 alignItems: 'center',
                 backgroundColor: 'var(--bg2)',
@@ -2056,22 +2754,14 @@ export default function App({ session, cloudState }) {
                 {/* Search */}
                 <div style={{ position: 'relative' }}>
                   <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
-                  <input 
-                    type="text" 
-                    placeholder="Pesquisar notas..." 
+                  <input
+                    type="text"
+                    placeholder="Pesquisar notas..."
                     value={diarySearchQuery}
                     onChange={(e) => setDiarySearchQuery(e.target.value)}
                     style={{ paddingLeft: '32px' }}
                   />
                 </div>
-
-                {/* Filter tags */}
-                <select value={diaryTagFilter} onChange={(e) => setDiaryTagFilter(e.target.value)}>
-                  <option value="all">Todas as Tags</option>
-                  {DIARY_TAGS.map(t => (
-                    <option key={t.key} value={t.key}>{t.label}</option>
-                  ))}
-                </select>
 
                 {/* Filter offer */}
                 <select value={diaryOfferFilter} onChange={(e) => setDiaryOfferFilter(e.target.value)}>
@@ -2080,6 +2770,22 @@ export default function App({ session, cloudState }) {
                     <option key={o.id} value={o.id}>{o.name}</option>
                   ))}
                 </select>
+
+                {/* Date range */}
+                <input
+                  type="date"
+                  value={diaryDateFrom}
+                  onChange={(e) => setDiaryDateFrom(e.target.value)}
+                  title="Data inicial"
+                  style={{ width: '140px', fontSize: '12px' }}
+                />
+                <input
+                  type="date"
+                  value={diaryDateTo}
+                  onChange={(e) => setDiaryDateTo(e.target.value)}
+                  title="Data final"
+                  style={{ width: '140px', fontSize: '12px' }}
+                />
 
                 {/* Auto entries toggle */}
                 <button
@@ -2090,7 +2796,7 @@ export default function App({ session, cloudState }) {
                   title={showAutoDiary ? 'Esconder entradas geradas automaticamente' : 'Mostrar entradas automáticas'}
                 >
                   {showAutoDiary ? <ToggleRight size={14} color="var(--green)" /> : <ToggleLeft size={14} color="var(--text3)" />}
-                  Automáticas
+                  Auto
                 </button>
 
                 {/* Export TXT */}
@@ -2107,7 +2813,20 @@ export default function App({ session, cloudState }) {
                     if (diarySearchQuery && !dy.text.toLowerCase().includes(diarySearchQuery.toLowerCase())) return false;
                     if (diaryTagFilter !== 'all' && dy.tag !== diaryTagFilter) return false;
                     if (diaryOfferFilter !== 'all' && dy.offerId !== diaryOfferFilter) return false;
+                    if (diaryDateFrom) {
+                      const d = new Date(dy.createdAt).toISOString().split('T')[0];
+                      if (d < diaryDateFrom) return false;
+                    }
+                    if (diaryDateTo) {
+                      const d = new Date(dy.createdAt).toISOString().split('T')[0];
+                      if (d > diaryDateTo) return false;
+                    }
                     return true;
+                  })
+                  .sort((a, b) => {
+                    // Pinned first, then by createdAt desc
+                    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+                    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
                   })
                   .map(dy => {
                     const linkedOffer = offers.find(o => o.id === dy.offerId);
@@ -2117,14 +2836,15 @@ export default function App({ session, cloudState }) {
                     const tagLabel = tagMeta?.label || dy.tag;
 
                     return (
-                      <div key={dy.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div key={dy.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderLeft: dy.pinned ? '3px solid var(--accent)' : undefined }}>
                         {/* Header */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontSize: '11px', color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            {dy.pinned && <Pin size={11} color="var(--accent)" />}
                             <Clock size={12} />
                             {new Date(dy.createdAt).toLocaleString('pt-BR')}
                           </span>
-                          
+
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             {dy.isAuto && (
                               <span className="badge badge-blue" style={{ fontSize: '9px' }} title="Entrada criada automaticamente">
@@ -2135,6 +2855,14 @@ export default function App({ session, cloudState }) {
                               {TagIcon && <TagIcon size={10} />}
                               {tagLabel}
                             </span>
+                            <button
+                              className="btn"
+                              onClick={() => setDiary(prev => prev.map(d => d.id === dy.id ? { ...d, pinned: !d.pinned } : d))}
+                              title={dy.pinned ? 'Desafixar' : 'Fixar no topo'}
+                              style={{ padding: '2px 4px', border: 'none', background: 'transparent', color: dy.pinned ? 'var(--accent)' : 'var(--text3)' }}
+                            >
+                              <Pin size={12} />
+                            </button>
                             <button
                               className="btn"
                               onClick={() => setEditingDiary(dy)}
@@ -2214,11 +2942,12 @@ export default function App({ session, cloudState }) {
           SLIDE-OUT DRAWER: OFFER DETAILS (440px Right)
           ======================================================== */}
       {selectedOfferIdForDrawer && activeOfferForDrawer && (() => {
-        const stats = getOfferStats(activeOfferForDrawer.id);
+        const stats = getOfferStats(activeOfferForDrawer.id, periodBounds.current);
+        const statsAllTime = getOfferStats(activeOfferForDrawer.id);
         const records = dailyData
           .filter(d => d.offerId === activeOfferForDrawer.id)
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        
+
         return (
           <>
             <div className="drawer-overlay" onClick={() => setSelectedOfferIdForDrawer(null)} />
@@ -2288,7 +3017,10 @@ export default function App({ session, cloudState }) {
 
               {/* Section: Metrics overview */}
               <div style={{ marginBottom: '24px' }}>
-                <h3 style={{ fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '4px' }}>Métricas Acumuladas</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '10px', borderBottom: '1px solid var(--border)', paddingBottom: '4px' }}>
+                  <h3 style={{ fontSize: '12px', color: 'var(--text3)', textTransform: 'uppercase', margin: 0 }}>Métricas</h3>
+                  <span style={{ fontSize: '10px', color: 'var(--accent)' }}>{periodLabel(periodFilter, periodBounds)}</span>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                   <div style={{ backgroundColor: 'var(--bg3)', padding: '10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
                     <div style={{ fontSize: '9px', color: 'var(--text2)' }}>ROAS</div>
@@ -2323,6 +3055,11 @@ export default function App({ session, cloudState }) {
                     <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{stats.arpu > 0 ? R(stats.arpu) : '—'}</div>
                   </div>
                 </div>
+                {periodFilter !== 'all' && (
+                  <div style={{ marginTop: '8px', fontSize: '10px', color: 'var(--text3)', textAlign: 'right' }}>
+                    Vida toda: {R(statsAllTime.revenue)} fat · {R(statsAllTime.profit)} lucro · {statsAllTime.roas > 0 ? Roas(statsAllTime.roas) + 'x ROAS' : 'sem ROAS'}
+                  </div>
+                )}
               </div>
 
               {/* Section: Setup Checklist */}
@@ -2697,10 +3434,31 @@ export default function App({ session, cloudState }) {
         <GoalModal
           initialValue={globalDailyGoal}
           onClose={() => setIsGoalModalOpen(false)}
-          onSubmit={(v) => { setGlobalDailyGoal(Number(v) || 0); setIsGoalModalOpen(false); }}
+          onSubmit={(v) => { setGlobalDailyGoal(Number(v) || 0); setIsGoalModalOpen(false); toast.success(`Meta diária atualizada para ${R(Number(v) || 0)}.`); }}
         />
       )}
 
+      {isCommandPaletteOpen && (
+        <CommandPalette
+          offers={offers}
+          tasks={tasks}
+          ideas={ideas}
+          onClose={() => setIsCommandPaletteOpen(false)}
+          onSelectPage={(page) => { setActivePage(page); setIsCommandPaletteOpen(false); }}
+          onSelectOffer={(id) => { setSelectedOfferIdForDrawer(id); setIsCommandPaletteOpen(false); }}
+          onAction={(act) => {
+            setIsCommandPaletteOpen(false);
+            if (act === 'new-offer') setIsNewOfferModalOpen(true);
+            else if (act === 'new-task') setIsNewTaskModalOpen(true);
+            else if (act === 'new-idea') setIsNewIdeaModalOpen(true);
+            else if (act === 'new-diary') setIsNewDiaryModalOpen(true);
+            else if (act === 'log-day') setIsDailyDataDrawerOpen(true);
+            else if (act === 'toggle-theme') setTheme(prev => prev === 'light' ? 'dark' : 'light');
+          }}
+        />
+      )}
+
+      <ToastHost />
     </div>
   );
 }
@@ -2887,8 +3645,8 @@ function OfferModal({ offer, prefill, prefilledStage, onClose, onSubmit }) {
 
           <div className="form-group">
             <label>Observações / Notas</label>
-            <textarea 
-              value={formData.notes} 
+            <textarea
+              value={formData.notes}
               onChange={e => setFormData({ ...formData, notes: e.target.value })}
               placeholder="Anotações gerais..."
               style={{ minHeight: '70px' }}
@@ -3416,6 +4174,377 @@ function DiaryModal({ offers, diary, onClose, onSubmit, onDelete }) {
 }
 
 // ==========================================
+// IDEAS MATRIX — Potencial x Esforço scatter
+// ==========================================
+function IdeasMatrix({ ideas, onEdit, onConvert }) {
+  // Group ideas by exact (potential, effort) so overlapping dots stack
+  const cellSize = 90;
+  const grid = {};
+  for (const i of ideas) {
+    const key = `${i.potential || 3}-${i.effort || 3}`;
+    if (!grid[key]) grid[key] = [];
+    grid[key].push(i);
+  }
+
+  return (
+    <div className="card" style={{ padding: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <h3 style={{ fontSize: '14px' }}>Matriz Potencial × Esforço</h3>
+        <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{ideas.length} ideia(s)</span>
+      </div>
+      <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '24px repeat(5, 1fr) 24px', gridTemplateRows: '24px repeat(5, 1fr) 24px', gap: 0 }}>
+        {/* Top axis label */}
+        <div style={{ gridColumn: '2 / span 5', gridRow: '1', textAlign: 'center', fontSize: '10px', color: 'var(--text3)' }}>← Menor Esforço · Maior Esforço →</div>
+        {/* Left axis label */}
+        <div style={{ gridColumn: '1', gridRow: '2 / span 5', display: 'flex', alignItems: 'center', justifyContent: 'center', writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: '10px', color: 'var(--text3)' }}>← Menor Potencial · Maior Potencial →</div>
+
+        {[5, 4, 3, 2, 1].map((potential, rowIdx) =>
+          [1, 2, 3, 4, 5].map((effort, colIdx) => {
+            const cellKey = `${potential}-${effort}`;
+            const items = grid[cellKey] || [];
+            const isHighValue = potential >= 4 && effort <= 2; // top-left = best
+            const isLowValue = potential <= 2 && effort >= 4; // bottom-right = avoid
+            return (
+              <div key={cellKey}
+                style={{
+                  gridColumn: colIdx + 2,
+                  gridRow: rowIdx + 2,
+                  minHeight: cellSize,
+                  border: '1px dashed var(--border)',
+                  backgroundColor: isHighValue ? 'rgba(16,185,129,0.06)' : isLowValue ? 'rgba(239,68,68,0.04)' : 'transparent',
+                  padding: '4px',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '4px',
+                  alignContent: 'flex-start'
+                }}>
+                {items.map(i => (
+                  <button
+                    key={i.id}
+                    onClick={() => onEdit(i)}
+                    title={`${i.name} — clique pra editar`}
+                    style={{
+                      backgroundColor: 'var(--accent)',
+                      color: 'white',
+                      border: 'none',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {i.name}
+                  </button>
+                ))}
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div style={{ marginTop: '12px', display: 'flex', gap: '16px', fontSize: '10px', color: 'var(--text3)' }}>
+        <span><span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: 'rgba(16,185,129,0.4)', borderRadius: '2px', marginRight: '4px', verticalAlign: 'middle' }} />Zona de ouro (alto potencial, baixo esforço)</span>
+        <span><span style={{ display: 'inline-block', width: '10px', height: '10px', backgroundColor: 'rgba(239,68,68,0.4)', borderRadius: '2px', marginRight: '4px', verticalAlign: 'middle' }} />Zona de evitar</span>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// KPI CARD — value + % delta + sparkline
+// ==========================================
+function KpiCard({ label, value, delta, deltaInverse, icon: Ico, color = 'var(--text)', trend }) {
+  const hasTrend = Array.isArray(trend) && trend.length > 1;
+  const hasDelta = delta !== null && delta !== undefined && Number.isFinite(delta);
+  // For deltaInverse (e.g., spend), positive change is bad
+  const goodChange = hasDelta ? (deltaInverse ? delta < 0 : delta > 0) : null;
+  const deltaColor = !hasDelta ? 'var(--text3)' : (goodChange ? 'var(--green)' : delta === 0 ? 'var(--text3)' : 'var(--red)');
+  const DeltaIcon = !hasDelta ? null : (delta > 0 ? ArrowUp : delta < 0 ? ArrowDown : null);
+
+  return (
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text2)' }}>
+        <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.04em' }}>{label}</span>
+        {Ico && <Ico size={13} color={color} />}
+      </div>
+      <span style={{ fontSize: '22px', fontWeight: 'bold', color, fontFamily: "'Space Grotesk', sans-serif" }}>{value}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '8px', minHeight: '20px' }}>
+        {hasDelta ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', fontSize: '11px', fontWeight: 600, color: deltaColor }}>
+            {DeltaIcon && <DeltaIcon size={10} />}
+            {Math.abs(delta).toFixed(1)}%
+            <span style={{ color: 'var(--text3)', fontWeight: 400, marginLeft: '4px' }}>vs anterior</span>
+          </span>
+        ) : <span />}
+        {hasTrend && <KpiSparkline values={trend} color={color} />}
+      </div>
+    </div>
+  );
+}
+
+function KpiSparkline({ values, color }) {
+  const w = 70, h = 22;
+  const max = Math.max(...values, 0);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * w;
+    const y = h - ((v - min) / range) * h;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return (
+    <svg width={w} height={h} style={{ display: 'block' }}>
+      <polyline fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" points={pts} opacity="0.7" />
+    </svg>
+  );
+}
+
+// Human label for the active period
+const periodLabel = (periodFilter, periodBounds) => {
+  if (periodFilter === 'today') return 'Hoje';
+  if (periodFilter === 'all') return 'Todo o período';
+  const fmt = (s) => s ? new Date(s + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '';
+  const r = periodBounds.current;
+  const labels = {
+    '7d': 'Últimos 7 dias',
+    '30d': 'Últimos 30 dias',
+    week: 'Esta semana',
+    month: 'Mês atual',
+    lastMonth: 'Mês passado'
+  };
+  const label = labels[periodFilter] || 'Período';
+  return r ? `${label} (${fmt(r.from)} – ${fmt(r.to)})` : label;
+};
+
+// Thin info banner showing which period is active
+function PeriodBanner({ periodFilter, periodBounds, suffix }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '8px',
+      fontSize: '11px', color: 'var(--text3)',
+      padding: '6px 10px', backgroundColor: 'var(--bg3)',
+      borderRadius: '6px', border: '1px solid var(--border)'
+    }}>
+      <Calendar size={12} color="var(--accent)" />
+      <span><strong style={{ color: 'var(--text2)' }}>{periodLabel(periodFilter, periodBounds)}</strong>{suffix ? ` · ${suffix}` : ''}</span>
+    </div>
+  );
+}
+
+// ==========================================
+// PERIOD PICKER — segmented control for date filtering
+// ==========================================
+function PeriodPicker({ value, onChange }) {
+  const options = [
+    { id: 'today', label: 'Hoje', hint: 'apenas hoje' },
+    { id: '7d', label: '7d', hint: 'últimos 7 dias' },
+    { id: '30d', label: '30d', hint: 'últimos 30 dias' },
+    { id: 'week', label: 'Semana', hint: 'esta semana (seg→dom)' },
+    { id: 'month', label: 'Mês', hint: 'mês atual completo' },
+    { id: 'lastMonth', label: 'Mês passado', hint: 'mês anterior completo' },
+    { id: 'all', label: 'Tudo', hint: 'sem filtro' }
+  ];
+  return (
+    <div style={{
+      display: 'inline-flex',
+      backgroundColor: 'var(--bg3)',
+      border: '1px solid var(--border)',
+      borderRadius: '6px',
+      padding: '2px',
+      flexWrap: 'wrap'
+    }}>
+      {options.map(opt => {
+        const active = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            onClick={() => onChange(opt.id)}
+            title={opt.hint}
+            style={{
+              backgroundColor: active ? 'var(--bg2)' : 'transparent',
+              color: active ? 'var(--text)' : 'var(--text2)',
+              border: active ? '1px solid var(--border2)' : '1px solid transparent',
+              borderRadius: '4px',
+              padding: '3px 10px',
+              fontSize: '11px',
+              fontWeight: 500,
+              cursor: 'pointer',
+              transition: 'all 120ms ease',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ==========================================
+// COMMAND PALETTE (Cmd+K / Ctrl+K) — fast nav + actions
+// ==========================================
+function CommandPalette({ offers, tasks, ideas, onClose, onSelectPage, onSelectOffer, onAction }) {
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const allItems = useMemo(() => {
+    const pages = [
+      { kind: 'page', id: 'dashboard', label: 'Dashboard', hint: 'visão geral', Icon: LayoutGrid },
+      { kind: 'page', id: 'pipeline', label: 'Pipeline', hint: 'ofertas', Icon: Layers },
+      { kind: 'page', id: 'kanban', label: 'Kanban', hint: 'tarefas', Icon: KanbanSquare },
+      { kind: 'page', id: 'ideas', label: 'Ideias', hint: 'banco de ideias', Icon: Lightbulb },
+      { kind: 'page', id: 'metrics', label: 'Métricas', hint: 'performance', Icon: TrendingUp },
+      { kind: 'page', id: 'diary', label: 'Diário', hint: 'log operacional', Icon: BookOpen },
+      { kind: 'page', id: 'utils', label: 'Calculadora & UTM', hint: 'utilitários', Icon: Calculator },
+    ];
+    const actions = [
+      { kind: 'action', id: 'new-offer', label: 'Nova oferta', hint: 'criar produto', Icon: Plus },
+      { kind: 'action', id: 'log-day', label: 'Registrar dia', hint: 'lançar faturamento', Icon: DollarSign },
+      { kind: 'action', id: 'new-task', label: 'Nova tarefa', hint: 'kanban', Icon: KanbanSquare },
+      { kind: 'action', id: 'new-idea', label: 'Nova ideia', hint: 'banco', Icon: Lightbulb },
+      { kind: 'action', id: 'new-diary', label: 'Nova entrada de diário', hint: 'anotar', Icon: BookOpen },
+      { kind: 'action', id: 'toggle-theme', label: 'Trocar tema (claro/escuro)', hint: 'aparência', Icon: Sun },
+    ];
+    const offerItems = (offers || []).map(o => ({
+      kind: 'offer', id: o.id, label: o.name, hint: `oferta · ${o.stage}`, Icon: null, offer: o
+    }));
+    return [...actions, ...pages, ...offerItems];
+  }, [offers]);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return allItems;
+    const q = query.toLowerCase();
+    return allItems.filter(item =>
+      item.label.toLowerCase().includes(q) || (item.hint || '').toLowerCase().includes(q)
+    );
+  }, [query, allItems]);
+
+  useEffect(() => { setHighlight(0); }, [query]);
+
+  const choose = (item) => {
+    if (!item) return;
+    if (item.kind === 'page') onSelectPage(item.id);
+    else if (item.kind === 'action') onAction(item.id);
+    else if (item.kind === 'offer') onSelectOffer(item.id);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight(h => Math.min(filtered.length - 1, h + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight(h => Math.max(0, h - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      choose(filtered[highlight]);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" style={{ zIndex: 220, alignItems: 'flex-start', paddingTop: '12vh' }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        backgroundColor: 'var(--bg2)',
+        border: '1px solid var(--border)',
+        borderRadius: '12px',
+        width: '100%',
+        maxWidth: '560px',
+        boxShadow: 'var(--shadow-lg)',
+        overflow: 'hidden'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+          <Search size={16} color="var(--text3)" />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Buscar páginas, ofertas, ou digite uma ação..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            style={{
+              flex: 1, border: 'none', boxShadow: 'none', background: 'transparent',
+              fontSize: '14px', padding: 0
+            }}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <span style={{ fontSize: '10px', color: 'var(--text3)', backgroundColor: 'var(--bg3)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'monospace' }}>ESC</span>
+        </div>
+
+        <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text3)', fontSize: '13px' }}>
+              Nada encontrado para "{query}".
+            </div>
+          )}
+          {filtered.map((item, idx) => {
+            const Ico = item.Icon;
+            const isHi = idx === highlight;
+            return (
+              <button
+                key={`${item.kind}-${item.id}`}
+                onMouseEnter={() => setHighlight(idx)}
+                onClick={() => choose(item)}
+                style={{
+                  width: '100%',
+                  border: 'none',
+                  background: isHi ? 'var(--bg3)' : 'transparent',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 16px',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  borderLeft: isHi ? '3px solid var(--accent)' : '3px solid transparent'
+                }}
+              >
+                {item.kind === 'offer' && item.offer ? (
+                  <OfferIcon offer={item.offer} size={15} color="var(--accent)" />
+                ) : Ico ? (
+                  <Ico size={15} color="var(--text2)" />
+                ) : null}
+                <span style={{ flex: 1, fontSize: '13px', color: 'var(--text)' }}>{item.label}</span>
+                <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{item.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 16px', borderTop: '1px solid var(--border)', fontSize: '10px', color: 'var(--text3)' }}>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <span><kbd style={kbdStyle}>↑</kbd> <kbd style={kbdStyle}>↓</kbd> navegar</span>
+            <span><kbd style={kbdStyle}>↵</kbd> selecionar</span>
+          </div>
+          <span>{filtered.length} resultado(s)</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const kbdStyle = {
+  display: 'inline-block',
+  backgroundColor: 'var(--bg3)',
+  color: 'var(--text2)',
+  fontFamily: 'monospace',
+  padding: '1px 5px',
+  borderRadius: '3px',
+  border: '1px solid var(--border)',
+  fontSize: '10px',
+  marginRight: '2px'
+};
+
+// ==========================================
 // CREATIVE MODAL (replaces window.prompt chain)
 // ==========================================
 function CreativeModal({ creative, onClose, onSubmit }) {
@@ -3544,6 +4673,23 @@ function GoalModal({ initialValue, onClose, onSubmit }) {
 // ==========================================
 // PAID TRAFFIC IDEAL CPA/ROAS CALCULATOR (UX Boost Helper)
 // ==========================================
+// Brazilian payment gateway presets (approx. — confirme com sua conta)
+const GATEWAY_PRESETS = [
+  { id: 'kiwify',      label: 'Kiwify',                percent: 9.9, fixed: 1.0 },
+  { id: 'hotmart',     label: 'Hotmart',               percent: 9.9, fixed: 1.0 },
+  { id: 'cakto',       label: 'Cakto',                 percent: 8.0, fixed: 0.95 },
+  { id: 'eduzz',       label: 'Eduzz',                 percent: 8.9, fixed: 1.49 },
+  { id: 'perfectpay',  label: 'PerfectPay',            percent: 6.99, fixed: 1.20 },
+  { id: 'pepper',      label: 'Pepper',                percent: 7.99, fixed: 1.00 },
+  { id: 'lowify',      label: 'Lowify',                percent: 7.0, fixed: 1.0 },
+  { id: 'yampi',       label: 'Yampi',                 percent: 4.99, fixed: 0.50 },
+  { id: 'vega',        label: 'Vega Checkout',         percent: 5.99, fixed: 0.79 },
+  { id: 'pagarme',     label: 'Pagar.me',              percent: 4.99, fixed: 0.39 },
+  { id: 'stripe',      label: 'Stripe',                percent: 3.99, fixed: 0.39 },
+  { id: 'mp',          label: 'Mercado Pago',          percent: 4.99, fixed: 0.49 },
+  { id: 'custom',      label: 'Personalizado',         percent: null, fixed: null }
+];
+
 function TrafficCalculator() {
   const loadSaved = () => {
     try {
@@ -3555,14 +4701,24 @@ function TrafficCalculator() {
   const saved = loadSaved();
 
   const [price, setPrice] = useState(saved?.price ?? 97);
-  const [gatewayPercent, setGatewayPercent] = useState(saved?.gatewayPercent ?? 8);
+  const [gatewayPreset, setGatewayPreset] = useState(saved?.gatewayPreset ?? 'kiwify');
+  const [gatewayPercent, setGatewayPercent] = useState(saved?.gatewayPercent ?? 9.9);
   const [gatewayFixed, setGatewayFixed] = useState(saved?.gatewayFixed ?? 1.0);
   const [targetMargin, setTargetMargin] = useState(saved?.targetMargin ?? 30);
   const [cogs, setCogs] = useState(saved?.cogs ?? 0);
 
+  const applyPreset = (presetId) => {
+    setGatewayPreset(presetId);
+    const p = GATEWAY_PRESETS.find(g => g.id === presetId);
+    if (p && p.percent !== null) {
+      setGatewayPercent(p.percent);
+      setGatewayFixed(p.fixed);
+    }
+  };
+
   useEffect(() => {
-    localStorage.setItem('ops_traffic_calc', JSON.stringify({ price, gatewayPercent, gatewayFixed, targetMargin, cogs }));
-  }, [price, gatewayPercent, gatewayFixed, targetMargin, cogs]);
+    localStorage.setItem('ops_traffic_calc', JSON.stringify({ price, gatewayPreset, gatewayPercent, gatewayFixed, targetMargin, cogs }));
+  }, [price, gatewayPreset, gatewayPercent, gatewayFixed, targetMargin, cogs]);
 
   // Computations
   const gatewayFee = (price * (gatewayPercent / 100)) + gatewayFixed;
@@ -3600,21 +4756,37 @@ function TrafficCalculator() {
         </div>
       </div>
 
+      <div className="form-group" style={{ margin: 0 }}>
+        <label>Gateway de Pagamento</label>
+        <select value={gatewayPreset} onChange={e => applyPreset(e.target.value)}>
+          {GATEWAY_PRESETS.map(p => (
+            <option key={p.id} value={p.id}>
+              {p.label}{p.percent !== null ? ` — ${p.percent}% + R$${p.fixed?.toFixed(2)}` : ''}
+            </option>
+          ))}
+        </select>
+        <p style={{ fontSize: '10px', color: 'var(--text3)', marginTop: '4px' }}>
+          Selecione seu gateway pra aplicar as taxas oficiais (você ainda pode ajustar manualmente abaixo).
+        </p>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
         <div className="form-group" style={{ margin: '0' }}>
           <label>Taxa Gateway (%)</label>
-          <input 
-            type="number" 
-            value={gatewayPercent} 
-            onChange={e => setGatewayPercent(Math.max(0, Number(e.target.value)))} 
+          <input
+            type="number"
+            step="0.01"
+            value={gatewayPercent}
+            onChange={e => { setGatewayPercent(Math.max(0, Number(e.target.value))); setGatewayPreset('custom'); }}
           />
         </div>
         <div className="form-group" style={{ margin: '0' }}>
           <label>Gateway Fixo (R$)</label>
-          <input 
-            type="number" 
-            value={gatewayFixed} 
-            onChange={e => setGatewayFixed(Math.max(0, Number(e.target.value)))} 
+          <input
+            type="number"
+            step="0.01"
+            value={gatewayFixed}
+            onChange={e => { setGatewayFixed(Math.max(0, Number(e.target.value))); setGatewayPreset('custom'); }}
           />
         </div>
         <div className="form-group" style={{ margin: '0' }}>
@@ -3699,6 +4871,16 @@ function UtmBuilder({ offers }) {
   const [campaign, setCampaign] = useState('');
   const [content, setContent] = useState('');
   const [isCopied, setIsCopied] = useState(false);
+  const [history, setHistory] = useState(() => {
+    try {
+      const raw = localStorage.getItem('ops_utm_history');
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('ops_utm_history', JSON.stringify(history.slice(0, 30)));
+  }, [history]);
 
   // Auto set campaign when offer is chosen
   const handleOfferSelect = (offerId) => {
@@ -3709,11 +4891,24 @@ function UtmBuilder({ offers }) {
     }
   };
 
+  // Source presets — pra acelerar entrada
+  const SOURCE_PRESETS = [
+    { source: 'facebook', medium: 'cpc', label: 'Facebook Ads' },
+    { source: 'instagram', medium: 'cpc', label: 'Instagram Ads' },
+    { source: 'google', medium: 'cpc', label: 'Google Ads' },
+    { source: 'tiktok', medium: 'cpc', label: 'TikTok Ads' },
+    { source: 'kwai', medium: 'cpc', label: 'Kwai Ads' },
+    { source: 'youtube', medium: 'cpc', label: 'YouTube Ads' },
+    { source: 'whatsapp', medium: 'message', label: 'WhatsApp' },
+    { source: 'organic', medium: 'social', label: 'Orgânico' },
+    { source: 'email', medium: 'newsletter', label: 'Email' }
+  ];
+
   // Concatenate UTMs
   const generateUrl = () => {
     if (!baseUrl.trim()) return '';
     let finalUrl = baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`;
-    
+
     const params = [];
     if (source) params.push(`utm_source=${encodeURIComponent(source)}`);
     if (medium) params.push(`utm_medium=${encodeURIComponent(medium)}`);
@@ -3733,6 +4928,13 @@ function UtmBuilder({ offers }) {
     navigator.clipboard.writeText(finalGeneratedUrl);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
+    // Save to history
+    setHistory(prev => {
+      const exists = prev.find(h => h.url === finalGeneratedUrl);
+      if (exists) return prev;
+      return [{ url: finalGeneratedUrl, source, medium, campaign, content, baseUrl, createdAt: new Date().toISOString() }, ...prev].slice(0, 30);
+    });
+    toast.success('Link copiado e salvo no histórico.');
   };
 
   return (
@@ -3750,12 +4952,39 @@ function UtmBuilder({ offers }) {
 
       <div className="form-group" style={{ margin: '0' }}>
         <label>URL Base (Página de Vendas / Checkout)</label>
-        <input 
-          type="text" 
-          placeholder="exemplo.com.br/checkout" 
+        <input
+          type="text"
+          placeholder="exemplo.com.br/checkout"
           value={baseUrl}
           onChange={e => setBaseUrl(e.target.value)}
         />
+      </div>
+
+      <div className="form-group" style={{ margin: '0' }}>
+        <label>Atalho de Origem</label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {SOURCE_PRESETS.map(p => {
+            const active = source === p.source && medium === p.medium;
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => { setSource(p.source); setMedium(p.medium); }}
+                style={{
+                  fontSize: '11px',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
+                  backgroundColor: active ? 'var(--bg3)' : 'transparent',
+                  color: active ? 'var(--accent)' : 'var(--text2)',
+                  cursor: 'pointer'
+                }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
@@ -3831,6 +5060,41 @@ function UtmBuilder({ offers }) {
             >
               {isCopied ? <Check size={14} color="var(--green)" /> : <Copy size={14} />}
             </button>
+          </div>
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div style={{ marginTop: '8px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text3)' }}>HISTÓRICO ({history.length})</span>
+            <button
+              onClick={() => { setHistory([]); toast.info('Histórico de UTMs limpo.'); }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: '11px' }}
+            >
+              Limpar
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+            {history.map((h, idx) => (
+              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', backgroundColor: 'var(--bg3)', borderRadius: '4px', fontSize: '10px' }}>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }} title={h.url}>{h.url}</span>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(h.url); toast.success('Link copiado.'); }}
+                  title="Copiar"
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text3)', cursor: 'pointer', padding: '2px' }}
+                >
+                  <Copy size={11} />
+                </button>
+                <button
+                  onClick={() => setHistory(prev => prev.filter((_, i) => i !== idx))}
+                  title="Remover"
+                  style={{ background: 'transparent', border: 'none', color: 'var(--red)', cursor: 'pointer', padding: '2px' }}
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}
